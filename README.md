@@ -3,7 +3,7 @@ Neural network method for mapping global sea surface height (SSH) from satellite
 
 This repo contains python code to fully reproduce our training and inference workflow for global SSH mapping from satellite altimetry and gridded SST observations ([pre-print](https://doi.org/10.31223/X5W676)). 
 
-Disclaimer: this workflow was developed with research/method development in mind, not to be a user-friendly package for production. In future, we hope to refactor the code to streamline the pipeline from observations to maps, make the code more user friendly, and make the workflow cloud-native to avoid having to download large datasets. That said, the code in this repo plus publicly available datasets (linked throughout the repo) is sufficient to fully reproduce our workflow given enough storage space ~15TB and access to multiple CPUs and GPUs.
+For a more user-friendly implementation designed for production, please see: https://github.com/smartin98/NeurOST.
 
 Steps to reproduce SSH mapping workflow:
 
