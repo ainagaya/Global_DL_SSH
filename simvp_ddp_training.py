@@ -435,6 +435,8 @@ def train(rank, world_size, checkpoint_path=None):
             train_loss += loss.item()
             num_batches += 1
 
+        print(train_loss)
+        print(num_batches)
         train_loss /= num_batches
         if rank == 0:
             #validation loop
