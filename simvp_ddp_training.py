@@ -181,7 +181,10 @@ class TACO_Dataset(Dataset):
             ds.coords["time"].item()   # Python datetime-like (if not NaT)
             # or (nice display)
             print(ds.coords["time"])
-            n_time = len(ds.time)
+            try:
+                n_time = ds.dims['time']
+            except KeyError:
+                n_time = 1  # If no time dimension, treat as single time step
             for t_idx in range(n_time - sequence_length):
                 self.sample_indices.append((source, t_idx))
         
