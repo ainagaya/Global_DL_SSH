@@ -166,9 +166,12 @@ class TACO_Dataset(Dataset):
         for source in self.data_sources:
             ds = nc_datasets[source]
             print(f"Processing {source} with dimensions {ds.dims}. Dataset: {ds}")
-            date = ds.attrs.get("date")
-            print(f"Date for {source}: {date}")
-            ds = self.merge_tracks_add_time(ds, date)
+            if source == "l3_swot.nc" or source == "l3_ssh.nc":
+                print("Merging tracks and adding time dimension for source:", source)
+                date = ds.attrs.get("date")
+                print(f"Date for {source}: {date}")
+                ds = self.merge_tracks_add_time(ds, date)
+                print(f"After merging tracks, {source} dimensions: {ds.dims}. Dataset: {ds}")
             # Assuming time dimension is 'time'
             n_time = len(ds.time)
             for t_idx in range(n_time - sequence_length):
@@ -479,7 +482,8 @@ def train(rank, world_size, checkpoint_path=None):
 
 if __name__ == "__main__":
     # num_processes = number of GPUs (currently need to be on same node)
-    num_processes = torch.cuda.device_count()
+    # num_processes = torch.cuda.device_count()
+    num_processes = 1 # set to 1 for debugging, set to number of GPUs for full training
     print(f'Number of GPUs used: {num_processes}')
 
     mp.spawn(train, args=(num_processes,), nprocs=num_processes,)  # add checkpoint file name here if restarting training
