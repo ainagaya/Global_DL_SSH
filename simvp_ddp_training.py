@@ -159,12 +159,12 @@ class TACO_Dataset(Dataset):
         print(f"\nLoaded {len(nc_datasets)} datasets")
         
         # Collect all data sources and indices
-        self.data_sources = list(taco_dict.keys())
+        self.data_sources = list(nc_datasets.keys())
         self.sample_indices = []
         
         # Build list of valid (source, time_idx) pairs
         for source in self.data_sources:
-            ds = taco_dict[source]
+            ds = nc_datasets[source]
             date = ds.attrs.get("date")
             ds = self.merge_tracks_add_time(ds, date)
             # Assuming time dimension is 'time'
