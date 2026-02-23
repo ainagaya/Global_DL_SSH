@@ -176,11 +176,6 @@ class TACO_Dataset(TacoDataset):
             print("ds.time:", ds.time)
             t = ds.coords["time"].values
             print("Time coordinate values for source", source, ":", t)
-            ds["time"].values          # numpy datetime64 scalar (or NaT)
-            # or
-            ds.coords["time"].item()   # Python datetime-like (if not NaT)
-            # or (nice display)
-            print(ds.coords["time"])
             try:
                 n_time = ds.dims['time']
             except KeyError:
@@ -265,8 +260,9 @@ class TACO_Dataset(TacoDataset):
             Dataset with variables aggregated over track (if present) and expanded with time dim.
         """
         # Normalize day to datetime64[ns]
-        
+        print("day:", day)
         day64 = np.datetime64(day, "ns")
+        print(day64)
 
         out_vars = {}
         for name, da in ds.data_vars.items():
