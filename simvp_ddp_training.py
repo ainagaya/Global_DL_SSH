@@ -165,7 +165,8 @@ class TACO_Dataset(Dataset):
         # Build list of valid (source, time_idx) pairs
         for source in self.data_sources:
             ds = taco_dict[source]
-            ds = self.merge_tracks_add_time(ds, day=source.split("_")[0])
+            date = ds.attrs.get("date")
+            ds = self.merge_tracks_add_time(ds, date)
             # Assuming time dimension is 'time'
             n_time = len(ds.time)
             for t_idx in range(n_time - sequence_length):
