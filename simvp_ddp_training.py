@@ -52,17 +52,6 @@ def download_all(files_df, max_workers=7):
 tacoreader.use("pandas")
 dataset = tacoreader.load("https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/main/")
 
-DATE = "2023-06-07"
-
-training_files = dataset.sql(f"""
-    SELECT
-        "l2:id" AS id,
-        REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
-    FROM l2
-    WHERE "l0:stac:time_start" LIKE '{DATE}%'
-    AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
-""")
-
 LON_MIN, LON_MAX = 130, 160
 LAT_MIN, LAT_MAX =  25,  55
 
@@ -345,14 +334,16 @@ def train(rank, world_size, checkpoint_path=None):
     # train_dataset_files = train_dataset_files[:n_train_batches]
     # n_train_batches=len(train_dataset_files)
 
-    TRAIN_DATE = "2023-06-07"
+    TRAIN_START_DATE = "2023-01-01"
+    TRAIN_END_DATE = "2023-01-15"
 
     training_files = dataset.sql(f"""
         SELECT
             "l2:id" AS id,
             REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
         FROM l2
-        WHERE "l0:stac:time_start" LIKE '{TRAIN_DATE}%'
+        WHERE "l0:stac:time_start" >= '{TRAIN_START_DATE}'
+        AND "l0:stac:time_start" <  '{TRAIN_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
     train_dataset = TACO_Dataset(training_files)
@@ -361,13 +352,16 @@ def train(rank, world_size, checkpoint_path=None):
     # val_dataset_files = [val_dir+f for f in val_files if '.tfrecord' in f]
     # val_dataset_files = val_dataset_files[:n_val_batches]
 
-    VAL_DATE = "2023-06-08"
+    VAL_START_DATE = "2023-06-08"
+    VAL_END_DATE = "2023-06-10"
+
     val_files = dataset.sql(f"""
         SELECT
             "l2:id" AS id,
             REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
         FROM l2
-        WHERE "l0:stac:time_start" LIKE '{VAL_DATE}%'
+        WHERE "l0:stac:time_start" >= '{VAL_START_DATE}'
+        AND "l0:stac:time_start" <  '{VAL_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
     val_dataset = TACO_Dataset(val_files)
@@ -375,13 +369,15 @@ def train(rank, world_size, checkpoint_path=None):
     # viz_files = os.listdir(val_dir)
     # viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
     # viz_dataset_files = viz_dataset_files[:4]
-    VIZ_DATE = "2023-06-09"
+    VIZ_START_DATE = "2023-06-09"
+    VIZ_END_DATE = "2023-06-10"
     viz_files = dataset.sql(f"""
         SELECT
             "l2:id" AS id,
             REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
         FROM l2
-        WHERE "l0:stac:time_start" LIKE '{VIZ_DATE}%'
+        WHERE "l0:stac:time_start" >= '{VIZ_START_DATE}'
+        AND "l0:stac:time_start" <  '{VIZ_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
     viz_dataset = TACO_Dataset(viz_files)
