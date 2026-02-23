@@ -262,8 +262,10 @@ class TACO_Dataset(Dataset):
         """
         # Normalize day to datetime64[ns]
         print("day:", day)
-        day64 = np.datetime64(day, "ns")
-        print(day64)
+        day_str = str(day)  # "20230609"
+        iso = f"{day_str[:4]}-{day_str[4:6]}-{day_str[6:8]}"  # "2023-06-09"
+        day64 = np.datetime64(iso, "ns")
+        print(day64)  # 2023-06-09T00:00:00.000000000
 
         out_vars = {}
         for name, da in ds.data_vars.items():
