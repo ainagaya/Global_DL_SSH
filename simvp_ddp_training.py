@@ -24,84 +24,63 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 import csv
 
+import xarray as xr
+
+import tacoreader
+
+import requests, io, xarray as xr
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def fetch_nc(row):
+    """Download a single NetCDF into memory and return (filename, xr.Dataset)."""
+    fname = row["id"].split("/")[-1]
+    r = requests.get(row["url"], headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    return fname, xr.open_dataset(io.BytesIO(r.content), engine="h5netcdf")
+
+def download_all(files_df, max_workers=7):
+    """Download all files in parallel into memory, return {filename: xr.Dataset}."""
+    datasets = {}
+    rows = [row for _, row in files_df.iterrows()]
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(fetch_nc, row): row for row in rows}
+        for f in as_completed(futures):
+            fname, ds = f.result()
+            datasets[fname] = ds
+    return datasets
+
+tacoreader.use("pandas")
+dataset = tacoreader.load("https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/main/")
+
+DATE = "2023-06-07"
+
+training_files = dataset.sql(f"""
+    SELECT
+        "l2:id" AS id,
+        REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
+    FROM l2
+    WHERE "l0:stac:time_start" LIKE '{DATE}%'
+    AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
+""")
+
+LON_MIN, LON_MAX = 130, 160
+LAT_MIN, LAT_MAX =  25,  55
+
+VARS = {
+    "glorys.nc" : ("thetao",                            "RdYlBu_r", "SST — GLORYS (°C)",  (5,  28)),
+    "l4_sst.nc" : ("analysed_sst",                      "RdYlBu_r", "SST — L4 (°C)",      (5,  28)),
+    "l3_sst.nc" : ("adjusted_sea_surface_temperature",  "RdYlBu_r", "SST — L3 (°C)",      (5,  28)),
+    "l4_ssh.nc" : ("sla",                               "RdBu_r",   "SSH — L4 (m)",       (-0.5, 0.5)),
+    "l3_ssh.nc" : ("sla_filtered",                      "RdBu_r",   "SSH — L3 (m)",       (-0.5, 0.5)),
+    "l3_swot.nc": ("ssha_filtered",                     "RdBu_r",   "SSH — SWOT (m)",     (-0.5, 0.5)),
+    "l4_sss.nc" : ("sos",                               "viridis",  "SSS — L4 (PSU)",     (32, 38)),
+}
+
 #pre-computed global normalisation stats
 mean_ssh = 0.074
 std_ssh = 0.0986
 mean_sst = 293.307
 std_sst = 8.726
-
-@tf.function
-def load_and_preprocess_batch(file_path):
-    try:
-        dataset = tf.data.TFRecordDataset(file_path)
-        dataset = dataset.map(parse_example)
-    except:
-        tf.print('File: '+file_path+' is corrupted')
-        dataset = tf.data.Dataset.from_tensor_slices([]) 
-    
-    return dataset
-
-@tf.function
-def parse_example(serialized_example):
-    feature_description = {
-        'input': tf.io.FixedLenFeature(int(batch_size*n_t*n*n*2), tf.float32),
-        'output': tf.io.FixedLenFeature(int(batch_size*n_t*n_obs_max*3), tf.float32)
-    }
-    try:
-        example = tf.io.parse_single_example(serialized_example, feature_description)
-
-        input_data = tf.reshape(example['input'], [batch_size,n_t,n,n,2])
-        input_data = normalise_ssh(input_data)
-        input_data = tf.transpose(tf.reshape(input_data,[batch_size,n_t,n,n,1]),perm=[0,1,4,2,3])
-
-        output_data = tf.reshape(example['output'], [batch_size,n_t,n_obs_max,3])
-
-        x = output_data[:,:,:,0]
-        x_new = rescale_x(x)
-        y = output_data[:,:,:,1]
-        y_new = rescale_y(y)
-        sla = output_data[:,:,:,2]
-        sla_new = normalise_ssh(sla)
-
-        outvar = tf.stack((x_new,y_new,sla_new),axis = -1)
-        
-    except:
-        tf.print('File: '+serialized_example+' is corrupted')
-        input_data = tf.zeros([batch_size,n_t,1,n,n],tf.float32)
-        outvar = tf.zeros([batch_size,n_t,n_obs_max,3],tf.float32)
-
-    return input_data, outvar
-
-@tf.function
-def parse_example_sst(serialized_example):
-    feature_description = {
-        'input': tf.io.FixedLenFeature(int(batch_size*n_t*n*n*2), tf.float32),
-        'output': tf.io.FixedLenFeature(int(batch_size*n_t*n_obs_max*3), tf.float32)
-    }
-    try:
-        example = tf.io.parse_single_example(serialized_example, feature_description)
-
-        input_data = tf.reshape(example['input'], [batch_size,n_t,n,n,2])
-        input_data_ssh = normalise_ssh(input_data[:,:,:,:,0])
-        input_data_sst = normalise_sst(input_data[:,:,:,:,1])
-        input_data = tf.transpose(tf.stack((input_data_ssh,input_data_sst),axis=-1),perm=[0,1,4,2,3])
-        output_data = tf.reshape(example['output'], [batch_size,n_t,n_obs_max,3])
-
-        x = output_data[:,:,:,0]
-        x_new = rescale_x(x)
-        y = output_data[:,:,:,1]
-        y_new = rescale_y(y)
-        sla = output_data[:,:,:,2]
-        sla_new = normalise_ssh(sla)
-
-        outvar = tf.stack((x_new,y_new,sla_new),axis = -1)
-    except:
-        tf.print('File is corrupted')
-        input_data = tf.zeros([batch_size,n_t,2,n,n],tf.float32)
-        outvar = tf.zeros([batch_size,n_t,n_obs_max,3],tf.float32)
-        
-
-    return input_data, outvar
 
 @tf.function
 def normalise_ssh(tensor):
@@ -162,23 +141,72 @@ def rescale_y(tensor):
     return updated_tensor
 
 
-class SSH_Dataset(Dataset):
-    def __init__(self, tfrecord_paths):
-        self.tfrecord_paths = tfrecord_paths
+class TACO_Dataset(Dataset):
+    def __init__(self, taco_dict, split='train', sequence_length=30, n_samples=None):
+        """
+        Args:
+            taco_dict: Dictionary of xarray datasets (one per data source)
+            split: 'train' or 'val'
+            sequence_length: Number of time steps per sample (default 30)
+            n_samples: Number of samples to use (None = use all)
+        """
+        self.taco_dict = taco_dict
+        self.split = split
+        self.sequence_length = sequence_length
 
+        print("Downloading files ...")
+        nc_datasets = download_all(taco_dict)
+        print(f"\nLoaded {len(nc_datasets)} datasets")
+        
+        # Collect all data sources and indices
+        self.data_sources = list(taco_dict.keys())
+        self.sample_indices = []
+        
+        # Build list of valid (source, time_idx) pairs
+        for source in self.data_sources:
+            ds = taco_dict[source]
+            # Assuming time dimension is 'time'
+            n_time = len(ds.time)
+            for t_idx in range(n_time - sequence_length):
+                self.sample_indices.append((source, t_idx))
+        
+        if n_samples is not None:
+            self.sample_indices = self.sample_indices[:n_samples]
+            
     def __len__(self):
-        return len(self.tfrecord_paths)
-
+        return len(self.sample_indices)
+    
     def __getitem__(self, idx):
-
-        serialized_example = tf.data.TFRecordDataset(self.tfrecord_paths[idx])
-        parsed_example = serialized_example.map(parse_example_sst)  # Parse the example
-        invar, outvar = next(iter(parsed_example))  # Extract the tensors from the parsed example
-        invar = torch.from_numpy(invar.numpy())
-        outvar = torch.from_numpy(outvar.numpy())
+        source, t_idx = self.sample_indices[idx]
+        ds = self.taco_dict[source]
         
+        # Extract time sequence (adjust variable names as needed)
+        # Assuming: 'ssh' = gridded SSH, 'ssh_obs' = observations with lat/lon/value
+        try:
+            # Input: gridded SSH for sequence_length timesteps
+            input_data = ds['l3_ssh.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            # Shape: (sequence_length, lat, lon)
+            
+            # Output: SWOT-like data
+            # If TACO stores observations differently, adjust accordingly
+            output_data = ds['l3_swot.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
+            
+            # Convert to tensors
+            input_tensor = torch.from_numpy(input_data).float()
+            output_tensor = torch.from_numpy(output_data).float()
+            
+            # Add channel dimension if needed for input
+            if input_tensor.ndim == 3:  # (T, H, W)
+                input_tensor = input_tensor.unsqueeze(1)  # (T, 1, H, W)
+            
+            return input_tensor, output_tensor
         
-        return invar, outvar
+        except Exception as e:
+            print(f"Error loading {source} at time {t_idx}: {e}")
+            # Return zero tensors as fallback
+            return torch.zeros((self.sequence_length, 1, 128, 128)), \
+                   torch.zeros((self.sequence_length, 400, 3))
 
 class LossLoggerCallback:
     def __init__(self, filename):
@@ -196,8 +224,8 @@ class LossLoggerCallback:
             for i in range(len(self.train_losses)):
                 writer.writerow([i+1, self.train_losses[i], self.val_losses[i]])
     
-train_dir = './pre-processed/training/'
-val_dir = './pre-processed/validation/'
+# train_dir = './pre-processed/training/'
+# val_dir = './pre-processed/validation/'
 
 weight_dir = './model_weights/'
 log_dir = './loss_logs/'
@@ -229,21 +257,51 @@ def train(rank, world_size, checkpoint_path=None):
     #SSH ONLY:
     # model = SimVP_Model_no_skip(in_shape=(n_t,1,128,128),model_type='gsta',hid_S=8,hid_T=128,drop=0.2,drop_path=0.15).to(rank)
 
-    train_files = os.listdir(train_dir)
-    train_dataset_files = [train_dir+f for f in train_files if '.tfrecord' in f]
-    train_dataset_files = train_dataset_files[:n_train_batches]
-    n_train_batches=len(train_dataset_files)
-    train_dataset = SSH_Dataset(train_dataset_files)
+    # train_files = os.listdir(train_dir)
+    # train_dataset_files = [train_dir+f for f in train_files if '.tfrecord' in f]
+    # train_dataset_files = train_dataset_files[:n_train_batches]
+    # n_train_batches=len(train_dataset_files)
 
-    val_files = os.listdir(val_dir)
-    val_dataset_files = [val_dir+f for f in val_files if '.tfrecord' in f]
-    val_dataset_files = val_dataset_files[:n_val_batches]
-    val_dataset = SSH_Dataset(val_dataset_files)
+    TRAIN_DATE = "2023-06-07"
+
+    training_files = dataset.sql(f"""
+        SELECT
+            "l2:id" AS id,
+            REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
+        FROM l2
+        WHERE "l0:stac:time_start" LIKE '{TRAIN_DATE}%'
+        AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
+        """)
+    train_dataset = TACO_Dataset(training_files)
+
+    # val_files = os.listdir(val_dir)
+    # val_dataset_files = [val_dir+f for f in val_files if '.tfrecord' in f]
+    # val_dataset_files = val_dataset_files[:n_val_batches]
+
+    VAL_DATE = "2023-06-08"
+    val_files = dataset.sql(f"""
+        SELECT
+            "l2:id" AS id,
+            REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
+        FROM l2
+        WHERE "l0:stac:time_start" LIKE '{VAL_DATE}%'
+        AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
+        """)
+    val_dataset = TACO_Dataset(val_files)
     
-    viz_files = os.listdir(val_dir)
-    viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
-    viz_dataset_files = viz_dataset_files[:4]
-    viz_dataset = SSH_Dataset(viz_dataset_files)
+    # viz_files = os.listdir(val_dir)
+    # viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
+    # viz_dataset_files = viz_dataset_files[:4]
+    VIZ_DATE = "2023-06-09"
+    viz_files = dataset.sql(f"""
+        SELECT
+            "l2:id" AS id,
+            REPLACE("l2:internal:gdal_vsi", '/vsicurl/', '') AS url
+        FROM l2
+        WHERE "l0:stac:time_start" LIKE '{VIZ_DATE}%'
+        AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
+        """)
+    viz_dataset = TACO_Dataset(viz_files)
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
