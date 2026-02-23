@@ -141,7 +141,7 @@ def rescale_y(tensor):
     return updated_tensor
 
 
-class TACO_Dataset(Dataset):
+class TACO_Dataset(TacoDataset):
     def __init__(self, taco_dict, split='train', sequence_length=30, n_samples=None):
         """
         Args:
@@ -170,7 +170,7 @@ class TACO_Dataset(Dataset):
                 print("Merging tracks and adding time dimension for source:", source)
                 date = ds.attrs.get("date")
                 print(f"Date for {source}: {date}")
-                ds = self.merge_tracks_add_time(ds, date)
+                ds = self.merge_tracks_add_time(date)
                 print(f"After merging tracks, {source} dimensions: {ds.dims}. Dataset: {ds}")
             # Assuming time dimension is 'time'
             print("ds.time:", ds.time)
@@ -265,6 +265,7 @@ class TACO_Dataset(Dataset):
             Dataset with variables aggregated over track (if present) and expanded with time dim.
         """
         # Normalize day to datetime64[ns]
+        
         day64 = np.datetime64(day, "ns")
 
         out_vars = {}
