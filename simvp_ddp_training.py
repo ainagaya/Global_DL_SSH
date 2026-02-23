@@ -165,7 +165,9 @@ class TACO_Dataset(Dataset):
         # Build list of valid (source, time_idx) pairs
         for source in self.data_sources:
             ds = nc_datasets[source]
+            print(f"Processing {source} with dimensions {ds.dims}. Dataset: {ds}")
             date = ds.attrs.get("date")
+            print(f"Date for {source}: {date}")
             ds = self.merge_tracks_add_time(ds, date)
             # Assuming time dimension is 'time'
             n_time = len(ds.time)
