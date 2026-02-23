@@ -165,6 +165,7 @@ class TACO_Dataset(Dataset):
         # Build list of valid (source, time_idx) pairs
         for source in self.data_sources:
             ds = taco_dict[source]
+            ds = self.merge_tracks_add_time(ds, day=source.split("_")[0])
             # Assuming time dimension is 'time'
             n_time = len(ds.time)
             for t_idx in range(n_time - sequence_length):
@@ -207,6 +208,71 @@ class TACO_Dataset(Dataset):
             # Return zero tensors as fallback
             return torch.zeros((self.sequence_length, 1, 128, 128)), \
                    torch.zeros((self.sequence_length, 400, 3))
+    
+
+    def merge_tracks_add_time(
+        ds: xr.Dataset,
+        day,
+        track_dim: str = "track",
+        time_dim: str = "time",
+        keep_track_vars: bool = True,
+    ) -> xr.Dataset:
+        """
+        Take a dataset like your L3 grids (lat, lon, track) with per-track metadata vars,
+        merge/aggregate all tracks into a single 2D grid for that day, and add a 1-length
+        'time' dimension whose value is the given day.
+
+        Rules:
+        - For each 2D (lat, lon) variable:
+            * If it's integer/bool-ish (e.g. is_overlap): take max across tracks (OR-like).
+            * Else: take mean across tracks, skipping NaNs.
+        - Non-(lat,lon) vars are kept only if keep_track_vars=True.
+        - If there's no track dimension on 2D vars, dataset is treated as already-merged.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Input dataset (already opened) for a single date.
+        day : str | np.datetime64 | datetime.date | pandas.Timestamp
+            The day to stamp into the new time coordinate (e.g. "2023-06-09").
+        track_dim : str
+            Name of the track dimension (default "track").
+        time_dim : str
+            Name of the output time dimension (default "time").
+        keep_track_vars : bool
+                Keep per-track metadata variables (track_ids, track_times, etc.) in output.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset with variables aggregated over track (if present) and expanded with time dim.
+        """
+        # Normalize day to datetime64[ns]
+        day64 = np.datetime64(day, "ns")
+
+        out_vars = {}
+        for name, da in ds.data_vars.items():
+            # Only aggregate variables that are 2D (lat, lon) and also have track_dim
+            if track_dim in da.dims and {"lat", "lon"}.issubset(set(da.dims)):
+                if np.issubdtype(da.dtype, np.integer) or da.dtype == np.bool_:
+                    out_vars[name] = da.max(dim=track_dim, skipna=True)
+                else:
+                    out_vars[name] = da.mean(dim=track_dim, skipna=True)
+            else:
+                if keep_track_vars:
+                    out_vars[name] = da
+
+        out = xr.Dataset(out_vars, coords={k: v for k, v in ds.coords.items() if k != track_dim})
+
+        # Preserve global attrs
+        out.attrs = dict(ds.attrs)
+
+        # Add a time dimension of length 1
+        out = out.expand_dims({time_dim: [day64]})
+
+        return out
+    
+    # ------------------
 
 class LossLoggerCallback:
     def __init__(self, filename):
