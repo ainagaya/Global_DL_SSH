@@ -173,6 +173,14 @@ class TACO_Dataset(Dataset):
                 ds = self.merge_tracks_add_time(ds, date)
                 print(f"After merging tracks, {source} dimensions: {ds.dims}. Dataset: {ds}")
             # Assuming time dimension is 'time'
+            print("ds.time:", ds.time)
+            t = ds.coords["time"].values
+            print("Time coordinate values for source", source, ":", t)
+            ds["time"].values          # numpy datetime64 scalar (or NaT)
+            # or
+            ds.coords["time"].item()   # Python datetime-like (if not NaT)
+            # or (nice display)
+            print(ds.coords["time"])
             n_time = len(ds.time)
             for t_idx in range(n_time - sequence_length):
                 self.sample_indices.append((source, t_idx))
