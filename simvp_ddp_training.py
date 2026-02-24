@@ -170,7 +170,7 @@ class TACO_Dataset(Dataset):
                     ds_merged.append(daily_dataset_time)
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
             # Assuming time dimension is 'time'
-            print("ds.time:", ds.time)
+            # print("ds.time:", ds.time)
             # merge datasets for each day into single dataset
             merged[source] = xr.concat(ds_merged, dim="time").sortby("time")
             t = merged[source].coords["time"].values
