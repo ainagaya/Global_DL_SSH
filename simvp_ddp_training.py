@@ -150,27 +150,33 @@ class TACO_Dataset(Dataset):
         print("Files to download:", taco_dict)
         nc_datasets = download_all(taco_dict)
         print(f"\nLoaded {len(nc_datasets)} datasets")
-        
+
         # Collect all data sources and indices
         self.data_sources = list(nc_datasets.keys())
         self.sample_indices = []
         
         # Build list of valid (source, time_idx) pairs
+        merged = {}
         for source in self.data_sources:
             ds = nc_datasets[source]
-            print(f"Processing {source} with dimensions {ds.dims}.")
-            if source == "l3_swot.nc" or source == "l3_ssh.nc":
-                print("Merging tracks and adding time dimension for source:", source)
-                date = ds.attrs.get("date")
-                print(f"Date for {source}: {date}")
-                ds = self._merge_tracks_add_time(ds, date)
-                print(f"After merging tracks, {source} dimensions: {ds.dims}.")
+            ds_merged = []
+            for daily_dataset in ds:
+                # print(f"Processing {source} with dimensions {ds.dims}.")
+                if source == "l3_swot.nc" or source == "l3_ssh.nc":
+                    print("Merging tracks and adding time dimension for source:", source)
+                    date = daily_dataset.attrs.get("date")
+                    print(f"Date for {source}, {daily_dataset}: {date}")
+                    daily_dataset_time = self._merge_tracks_add_time(daily_dataset, date)
+                    ds_merged.append(daily_dataset_time)
+                print(f"After merging tracks, {source} dimensions: {ds_merged.dims}.")
             # Assuming time dimension is 'time'
             print("ds.time:", ds.time)
-            t = ds.coords["time"].values
+            # merge datasets for each day into single dataset
+            merged[source] = xr.concat(ds_merged, dim="time").sortby("time")
+            t = merged[source].coords["time"].values
             print("Time coordinate values for source", source, ":", t)
             try:
-                n_time = ds.dims['time']
+                n_time = merged[source].dims['time']
             except KeyError:
                 n_time = 1  # If no time dimension, treat as single time step
             for t_idx in range(n_time - sequence_length):
@@ -180,6 +186,8 @@ class TACO_Dataset(Dataset):
             self.sample_indices = self.sample_indices[:n_samples]
 
         print(f"Total samples for split '{split}': {len(self.sample_indices)}")
+
+        ds = merged
             
     def __len__(self):
         return len(self.sample_indices)
