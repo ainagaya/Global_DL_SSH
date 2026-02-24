@@ -144,6 +144,7 @@ class TACO_Dataset(Dataset):
         self.sequence_length = sequence_length
 
         print("Downloading files ...")
+        print("Files to download:", list(taco_dict.keys()))
         nc_datasets = download_all(taco_dict)
         print(f"\nLoaded {len(nc_datasets)} datasets")
         
@@ -154,13 +155,13 @@ class TACO_Dataset(Dataset):
         # Build list of valid (source, time_idx) pairs
         for source in self.data_sources:
             ds = nc_datasets[source]
-            print(f"Processing {source} with dimensions {ds.dims}. Dataset: {ds}")
+            print(f"Processing {source} with dimensions {ds.dims}.")
             if source == "l3_swot.nc" or source == "l3_ssh.nc":
                 print("Merging tracks and adding time dimension for source:", source)
                 date = ds.attrs.get("date")
                 print(f"Date for {source}: {date}")
                 ds = self._merge_tracks_add_time(ds, date)
-                print(f"After merging tracks, {source} dimensions: {ds.dims}. Dataset: {ds}")
+                print(f"After merging tracks, {source} dimensions: {ds.dims}.")
             # Assuming time dimension is 'time'
             print("ds.time:", ds.time)
             t = ds.coords["time"].values
