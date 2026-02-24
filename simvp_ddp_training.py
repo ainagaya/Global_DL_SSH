@@ -201,11 +201,13 @@ class TACO_Dataset(Dataset):
         # Assuming: 'ssh' = gridded SSH, 'ssh_obs' = observations with lat/lon/value
         try:
             # Input: gridded SSH for sequence_length timesteps
-            input_data = self.ds['l3_ssh.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            input_data = self.ds['l3_ssh.nc']["sla_filtered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            print(f"Input data shape for source {source} at time index {t_idx}: {input_data.shape}. Input data: {input_data}")
             # Shape: (sequence_length, lat, lon)
             
             # Output: SWOT-like data
-            output_data = self.ds['l3_swot.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            output_data = self.ds['l3_swot.nc']["ssha_unfiltered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            print(f"Output data shape for source {source} at time index {t_idx}: {output_data.shape}. Output data: {output_data}")
             # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
             
             # Convert to tensors
