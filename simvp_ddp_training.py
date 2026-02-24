@@ -188,14 +188,14 @@ class TACO_Dataset(Dataset):
 
             print(f"Total samples for split '{split}': {len(self.sample_indices)}")
 
-        ds = merged
+        self.ds = merged
             
     def __len__(self):
         return len(self.sample_indices)
     
     def __getitem__(self, idx):
         source, t_idx = self.sample_indices[idx]
-        source_ds = ds[source]
+        source_ds = self.ds[source]
         
         # Extract time sequence (adjust variable names as needed)
         # Assuming: 'ssh' = gridded SSH, 'ssh_obs' = observations with lat/lon/value
