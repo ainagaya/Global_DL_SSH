@@ -335,8 +335,8 @@ def train(rank, world_size, checkpoint_path=None):
     # train_dataset_files = train_dataset_files[:n_train_batches]
     # n_train_batches=len(train_dataset_files)
 
-    TRAIN_START_DATE = "2023-01-01"
-    TRAIN_END_DATE = "2023-01-15"
+    TRAIN_START_DATE = "2023-05-01"
+    TRAIN_END_DATE = "2023-05-15"
 
     training_files = dataset.sql(f"""
         SELECT
@@ -347,14 +347,14 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l0:stac:time_start" <  '{TRAIN_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
-    train_dataset = TACO_Dataset(training_files)
+    train_dataset = TACO_Dataset(training_files, split="train")
 
     # val_files = os.listdir(val_dir)
     # val_dataset_files = [val_dir+f for f in val_files if '.tfrecord' in f]
     # val_dataset_files = val_dataset_files[:n_val_batches]
 
-    VAL_START_DATE = "2023-06-08"
-    VAL_END_DATE = "2023-06-10"
+    VAL_START_DATE = "2023-06-01"
+    VAL_END_DATE = "2023-06-15"
 
     val_files = dataset.sql(f"""
         SELECT
@@ -365,13 +365,13 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l0:stac:time_start" <  '{VAL_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
-    val_dataset = TACO_Dataset(val_files)
+    val_dataset = TACO_Dataset(val_files, split="val")
     
     # viz_files = os.listdir(val_dir)
     # viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
     # viz_dataset_files = viz_dataset_files[:4]
-    VIZ_START_DATE = "2023-06-09"
-    VIZ_END_DATE = "2023-06-10"
+    VIZ_START_DATE = "2023-07-01"
+    VIZ_END_DATE = "2023-07-15"
     viz_files = dataset.sql(f"""
         SELECT
             "l2:id" AS id,
@@ -381,7 +381,7 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l0:stac:time_start" <  '{VIZ_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
-    viz_dataset = TACO_Dataset(viz_files)
+    viz_dataset = TACO_Dataset(viz_files, split="viz")
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
