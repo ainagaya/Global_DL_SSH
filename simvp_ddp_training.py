@@ -46,7 +46,10 @@ def download_all(files_df, max_workers=7):
         futures = {pool.submit(fetch_nc, row): row for row in rows}
         for f in as_completed(futures):
             fname, ds = f.result()
-            datasets[fname] = ds
+            if fname in datasets:
+                datasets[fname].append(ds)
+            else:
+                datasets[fname] = [ds]
     return datasets
 
 tacoreader.use("pandas")
