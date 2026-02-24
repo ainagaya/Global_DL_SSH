@@ -147,7 +147,7 @@ class TACO_Dataset(Dataset):
         self.sequence_length = sequence_length
 
         print("Downloading files ...")
-        print("Files to download:", list(taco_dict.keys()))
+        print("Files to download:", taco_dict)
         nc_datasets = download_all(taco_dict)
         print(f"\nLoaded {len(nc_datasets)} datasets")
         
