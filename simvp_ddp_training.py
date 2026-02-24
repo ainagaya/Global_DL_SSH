@@ -199,32 +199,30 @@ class TACO_Dataset(Dataset):
         
         # Extract time sequence (adjust variable names as needed)
         # Assuming: 'ssh' = gridded SSH, 'ssh_obs' = observations with lat/lon/value
-        try:
-            # Input: gridded SSH for sequence_length timesteps
-            input_data = self.ds['l3_ssh.nc']["sla_filtered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
-            print(f"Input data shape for source {source} at time index {t_idx}: {input_data.shape}. Input data: {input_data}")
-            # Shape: (sequence_length, lat, lon)
-            
-            # Output: SWOT-like data
-            output_data = self.ds['l3_swot.nc']["ssha_unfiltered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
-            print(f"Output data shape for source {source} at time index {t_idx}: {output_data.shape}. Output data: {output_data}")
-            # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
-            
-            # Convert to tensors
-            input_tensor = torch.from_numpy(input_data).float()
-            output_tensor = torch.from_numpy(output_data).float()
-            
-            # Add channel dimension if needed for input
-            if input_tensor.ndim == 3:  # (T, H, W)
-                input_tensor = input_tensor.unsqueeze(1)  # (T, 1, H, W)
-            
-            return input_tensor, output_tensor
+
+        # Input: gridded SSH for sequence_length timesteps
+        input_data = self.ds['l3_ssh.nc']["sla_filtered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+        # print(f"Input data shape for source {source} at time index {t_idx}: {input_data.shape}. Input data: {input_data}")
+        # Shape: (sequence_length, lat, lon)
         
-        except Exception as e:
-            print(f"Error loading {source} at time {t_idx}: {e}")
-            # Return zero tensors as fallback
-            return torch.zeros((self.sequence_length, 1, 128, 128)), \
-                   torch.zeros((self.sequence_length, 400, 3))
+        # Output: SWOT-like data
+        output_data = self.ds['l3_swot.nc']["ssha_unfiltered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+        # print(f"Output data shape for source {source} at time index {t_idx}: {output_data.shape}. Output data: {output_data}")
+        # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
+        
+        # Convert to tensors
+        input_tensor = torch.from_numpy(input_data).float()
+        output_tensor = torch.from_numpy(output_data).float()
+        
+        # Add channel dimension if needed for input
+        if input_tensor.ndim == 3:  # (T, H, W)
+            input_tensor = input_tensor.unsqueeze(1)  # (T, 1, H, W)
+
+        if input_tensor.ndim == 4:
+            input_tensor = input_tensor.unsqueeze(0)  # (1, T, C, H, W)
+        
+        return input_tensor, output_tensor
+
     
 
     @staticmethod
