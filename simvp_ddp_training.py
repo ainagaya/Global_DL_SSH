@@ -134,7 +134,7 @@ def rescale_y(tensor):
 
 
 class TACO_Dataset(Dataset):
-    def __init__(self, taco_dict, split='train', sequence_length=30, n_samples=None):
+    def __init__(self, taco_dict, split='train', sequence_length=5, n_samples=None):
         """
         Args:
             taco_dict: Dictionary of xarray datasets (one per data source)
@@ -175,10 +175,11 @@ class TACO_Dataset(Dataset):
                 merged[source] = xr.concat(ds_merged, dim="time").sortby("time")
                 t = merged[source].coords["time"].values
                 print("Time coordinate values for source", source, ":", t)
-                try:
-                    n_time = merged[source].dims['time']
-                except KeyError:
-                    n_time = 1  # If no time dimension, treat as single time step
+                n_time = merged[source].dims['time']
+                # try:
+                #     n_time = merged[source].dims['time']
+                # except KeyError:
+                #     n_time = 1  # If no time dimension, treat as single time step
                 for t_idx in range(n_time - sequence_length):
                     self.sample_indices.append((source, t_idx))
             
