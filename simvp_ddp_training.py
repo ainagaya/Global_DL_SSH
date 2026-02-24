@@ -174,6 +174,8 @@ class TACO_Dataset(Dataset):
         
         if n_samples is not None:
             self.sample_indices = self.sample_indices[:n_samples]
+
+        print(f"Total samples for split '{split}': {len(self.sample_indices)}")
             
     def __len__(self):
         return len(self.sample_indices)
@@ -190,7 +192,6 @@ class TACO_Dataset(Dataset):
             # Shape: (sequence_length, lat, lon)
             
             # Output: SWOT-like data
-            # If TACO stores observations differently, adjust accordingly
             output_data = ds['l3_swot.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
             # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
             
