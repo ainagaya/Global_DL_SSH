@@ -195,17 +195,17 @@ class TACO_Dataset(Dataset):
     
     def __getitem__(self, idx):
         source, t_idx = self.sample_indices[idx]
-        ds = self.taco_dict[source]
+        source_ds = ds[source]
         
         # Extract time sequence (adjust variable names as needed)
         # Assuming: 'ssh' = gridded SSH, 'ssh_obs' = observations with lat/lon/value
         try:
             # Input: gridded SSH for sequence_length timesteps
-            input_data = ds['l3_ssh.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            input_data = source_ds['l3_ssh.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
             # Shape: (sequence_length, lat, lon)
             
             # Output: SWOT-like data
-            output_data = ds['l3_swot.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+            output_data = source_ds['l3_swot.nc'].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
             # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
             
             # Convert to tensors
