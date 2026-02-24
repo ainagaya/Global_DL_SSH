@@ -418,6 +418,9 @@ def train(rank, world_size, checkpoint_path=None):
         model.train()
         train_loss = 0.0
         num_batches=0
+        print(f"Epoch {epoch+1}/{num_epochs} - Training...")
+        print(f"torch_input_batch: {torch_input_batch.shape}, torch_output_batch: {torch_output_batch.shape}")
+        print(f"train_loader", train_loader)
         for torch_input_batch, torch_output_batch in train_loader:
             optimizer.zero_grad(set_to_none=True)
             torch_input_batch = torch_input_batch.squeeze(0).to(rank)
