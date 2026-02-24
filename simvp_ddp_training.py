@@ -378,7 +378,7 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l0:stac:time_start" <  '{VAL_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
-    val_dataset = TACO_Dataset(val_files, split="val")
+    # val_dataset = TACO_Dataset(val_files, split="val")
     
     # viz_files = os.listdir(val_dir)
     # viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
@@ -394,15 +394,15 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l0:stac:time_start" <  '{VIZ_END_DATE}'
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
-    viz_dataset = TACO_Dataset(viz_files, split="viz")
+    # viz_dataset = TACO_Dataset(viz_files, split="viz")
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-    viz_sampler = torch.utils.data.distributed.DistributedSampler(viz_dataset)
+    # val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+    # viz_sampler = torch.utils.data.distributed.DistributedSampler(viz_dataset)
     
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers=workers_per_gpu, sampler=train_sampler)
-    val_loader = torch.utils.data.DataLoader(val_dataset, num_workers=workers_per_gpu, sampler=val_sampler)
-    viz_loader = torch.utils.data.DataLoader(viz_dataset, num_workers=workers_per_gpu, sampler=viz_sampler)
+    # val_loader = torch.utils.data.DataLoader(val_dataset, num_workers=workers_per_gpu, sampler=val_sampler)
+    # viz_loader = torch.utils.data.DataLoader(viz_dataset, num_workers=workers_per_gpu, sampler=viz_sampler)
     
     model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     optimizer = optim.Adam(model.parameters(), lr=lr)
