@@ -168,7 +168,7 @@ class TACO_Dataset(Dataset):
                     print(f"Date for {source}, {daily_dataset}: {date}")
                     daily_dataset_time = self._merge_tracks_add_time(daily_dataset, date)
                     ds_merged.append(daily_dataset_time)
-                print(f"After merging tracks, {source} dimensions: {ds_merged.dims}.")
+                print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
             # Assuming time dimension is 'time'
             print("ds.time:", ds.time)
             # merge datasets for each day into single dataset
