@@ -171,9 +171,11 @@ class TACO_Dataset(Dataset):
                     print(f"Date for {source}, {daily_dataset}: {date}")
                     daily_dataset_time = self._merge_tracks_add_time(daily_dataset, date)
                     lats = daily_dataset_time.coords["lat"].values
-                    daily_dataset_time_cropped = slice(LAT_MAX, LAT_MIN) if lats[0] > lats[-1] else slice(LAT_MIN, LAT_MAX)
-                    daily_dataset_interpolated_128 = daily_dataset_time_cropped.interp(lat=lat_new, lon=lon_new, method="linear")
-                    ds_merged.append(daily_dataset_time_cropped)
+                    ds_sorted = daily_dataset_time.sortby("lat")
+                    ds_cropped = ds_sorted.sel(lat=slice(LAT_MIN, LAT_MAX), lon=slice(LON_MIN, LON_MAX))
+                    # daily_dataset_time_cropped = slice(LAT_MAX, LAT_MIN) if lats[0] > lats[-1] else slice(LAT_MIN, LAT_MAX)
+                    daily_dataset_interpolated_128 = ds_cropped.interp(lat=lat_new, lon=lon_new, method="linear")
+                    ds_merged.append(daily_dataset_interpolated_128)
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
                 # Assuming time dimension is 'time'
                 # print("ds.time:", ds.time)
