@@ -328,6 +328,11 @@ weight_dir = './model_weights/'
 log_dir = './loss_logs/'
 viz_dir = './model_preds/'
 
+# create directories
+os.makedirs(weight_dir, exist_ok=True)
+os.makedirs(log_dir, exist_ok=True)
+os.makedirs(viz_dir, exist_ok=True)
+
 n_t = 5
 L_x = 960e3
 L_y = 960e3
@@ -464,8 +469,8 @@ def train(rank, world_size, checkpoint_path=None):
             train_loss += loss.item()
             num_batches += 1
 
-        print(train_loss)
-        print(num_batches)
+        print("Train loss:", train_loss)
+        print("num_batches:", num_batches)
         train_loss /= num_batches
         if rank == 0:
             #validation loop
