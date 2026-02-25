@@ -155,8 +155,8 @@ class TACO_Dataset(Dataset):
         self.data_sources = list(nc_datasets.keys())
         self.sample_indices = []
 
-        lat_new = np.linspace(float(ds.lat.min()), float(ds.lat.max()), 128)
-        lon_new = np.linspace(float(ds.lon.min()), float(ds.lon.max()), 128)
+        lat_new = np.linspace(float(LAT_MIN), float(LAT_MAX), 128)
+        lon_new = np.linspace(float(LON_MIN), float(LON_MAX), 128)
         
         # Build list of valid (source, time_idx) pairs
         merged = {}
