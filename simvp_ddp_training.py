@@ -338,10 +338,10 @@ def train(rank, world_size, checkpoint_path=None):
     n_val_batches = 500
 
     #SSH-SST:
-    model = SimVP_Model_no_skip_sst(in_shape=(n_t,2,128,128),model_type='gsta',hid_S=8,hid_T=128,drop=0.2,drop_path=0.15).to(rank)
+    # model = SimVP_Model_no_skip_sst(in_shape=(n_t,2,128,128),model_type='gsta',hid_S=8,hid_T=128,drop=0.2,drop_path=0.15).to(rank)
     
     #SSH ONLY:
-    # model = SimVP_Model_no_skip(in_shape=(n_t,1,128,128),model_type='gsta',hid_S=8,hid_T=128,drop=0.2,drop_path=0.15).to(rank)
+    model = SimVP_Model_no_skip(in_shape=(n_t,1,128,128),model_type='gsta',hid_S=8,hid_T=128,drop=0.2,drop_path=0.15).to(rank)
 
     # train_files = os.listdir(train_dir)
     # train_dataset_files = [train_dir+f for f in train_files if '.tfrecord' in f]
