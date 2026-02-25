@@ -218,8 +218,8 @@ class TACO_Dataset(Dataset):
         if input_tensor.ndim == 3:  # (T, H, W)
             input_tensor = input_tensor.unsqueeze(1)  # (T, 1, H, W)
 
-        # if input_tensor.ndim == 4:
-         #   input_tensor = input_tensor.unsqueeze(0)  # (1, T, C, H, W)
+        if input_tensor.ndim == 4:
+           input_tensor = input_tensor.unsqueeze(0)  # (1, T, C, H, W)
         
         return input_tensor, output_tensor
 
@@ -323,9 +323,9 @@ L_y = 960e3
 n = 128
 batch_size = 25 # DON'T CHANGE, THIS IS FIXED IN THE PRE-PROCESSING TO BE 1 BATCH PER FILE
 n_obs_max = 400 # max number of SSH observations on any day in loss function, allows to have fixed size inputs/outputs with zero padding making it easier to create TFRecord dataset
-n_train_samples = 1000000
+n_train_samples = 1000
 experiment_name = f'simvp_ssh_sst_ns{n_train_samples}_global_'
-num_epochs = 50
+num_epochs = 10
 workers_per_gpu = 8 # sets the number of CPU processes used per GPU to parallelise the data loading/pre-processing
             
 frames = n_t
@@ -438,7 +438,8 @@ def train(rank, world_size, checkpoint_path=None):
             print(f"torch_input_batch: {torch_input_batch.shape}, torch_output_batch: {torch_output_batch.shape}")
             optimizer.zero_grad(set_to_none=True)
             torch_input_batch = torch_input_batch.squeeze(0).to(rank)
-            torch_output_batch = torch_output_batch.squeeze(0).to(rank)            
+            torch_output_batch = torch_output_batch.squeeze(0).to(rank) 
+            print(f"torch_input_batch after sqeeze: {torch_input_batch.shape}, torch_output_batch after sqeeze: {torch_output_batch.shape}")           
             with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
                 outputs = model(torch_input_batch)
                 loss = criterion(outputs, torch_output_batch)
