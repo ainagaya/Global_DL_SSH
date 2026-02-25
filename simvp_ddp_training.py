@@ -514,7 +514,7 @@ def train(rank, world_size, checkpoint_path=None):
                     torch_output_batch = torch_output_batch.squeeze(0).to(rank)
 
                     val_preds = model(torch_input_batch)
-                    pred[int(25*i):int(25*(i+1)),:,:,:,:] = val_preds.cpu().numpy()
+                    pred[int(i):int(5*(i+1)),:,:,:,:] = val_preds.cpu().numpy()
                     i+=1
             np.save(viz_dir+experiment_name+f'pred_viz_epoch{epoch}.npy',pred)
 
