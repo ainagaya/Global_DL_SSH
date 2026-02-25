@@ -55,8 +55,8 @@ def download_all(files_df, max_workers=7):
 tacoreader.use("pandas")
 dataset = tacoreader.load("https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/main/")
 
-LON_MIN, LON_MAX = 130, 160
-LAT_MIN, LAT_MAX =  25,  55
+LON_MIN, LON_MAX = 90, 95
+LAT_MIN, LAT_MAX =  0,  5
 
 VARS = {
     "glorys.nc" : ("thetao",                            "RdYlBu_r", "SST — GLORYS (°C)",  (5,  28)),
@@ -154,6 +154,9 @@ class TACO_Dataset(Dataset):
         # Collect all data sources and indices
         self.data_sources = list(nc_datasets.keys())
         self.sample_indices = []
+
+        lat_new = np.linspace(float(ds.lat.min()), float(ds.lat.max()), 128)
+        lon_new = np.linspace(float(ds.lon.min()), float(ds.lon.max()), 128)
         
         # Build list of valid (source, time_idx) pairs
         merged = {}
@@ -167,7 +170,10 @@ class TACO_Dataset(Dataset):
                     date = daily_dataset.attrs.get("date")
                     print(f"Date for {source}, {daily_dataset}: {date}")
                     daily_dataset_time = self._merge_tracks_add_time(daily_dataset, date)
-                    ds_merged.append(daily_dataset_time)
+                    lats = daily_dataset_time.coords["lat"].values
+                    daily_dataset_time_cropped = slice(LAT_MAX, LAT_MIN) if lats[0] > lats[-1] else slice(LAT_MIN, LAT_MAX)
+                    daily_dataset_interpolated_128 = daily_dataset_time_cropped.interp(lat=lat_new, lon=lon_new, method="linear")
+                    ds_merged.append(daily_dataset_time_cropped)
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
                 # Assuming time dimension is 'time'
                 # print("ds.time:", ds.time)

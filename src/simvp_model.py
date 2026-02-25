@@ -39,8 +39,6 @@ class SimVP_Model_no_skip(nn.Module):
     def forward(self, x_raw, **kwargs):
         B, T, C, H, W = x_raw.shape
         x = x_raw.view(B*T, C, H, W)
-        x2 = F.interpolate(x2, size=(128, 128), mode="bilinear", align_corners=False)
-        x  = x2.reshape(B, T, C, 128, 128)
 
         embed = self.enc(x)
         _, C_, H_, W_ = embed.shape
