@@ -506,7 +506,7 @@ def train(rank, world_size, checkpoint_path=None):
             torch.save(checkpoint, weight_dir+experiment_name+f'_weights_epoch{epoch}')
             
             # optional visualisation of predictions during training
-            pred = np.zeros((100,30,1,128,128))
+            pred = np.zeros((1,5,1,128,128))
             i = 0
             with torch.no_grad():
                 for torch_input_batch, torch_output_batch in viz_loader:
