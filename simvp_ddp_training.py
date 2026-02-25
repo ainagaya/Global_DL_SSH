@@ -175,6 +175,7 @@ class TACO_Dataset(Dataset):
                     ds_cropped = ds_sorted.sel(lat=slice(LAT_MIN, LAT_MAX), lon=slice(LON_MIN, LON_MAX))
                     # daily_dataset_time_cropped = slice(LAT_MAX, LAT_MIN) if lats[0] > lats[-1] else slice(LAT_MIN, LAT_MAX)
                     daily_dataset_interpolated_128 = ds_cropped.interp(lat=lat_new, lon=lon_new, method="linear")
+                    daily_dataset_interpolated_128[np.isnan(daily_dataset_interpolated_128)] = 0
                     ds_merged.append(daily_dataset_interpolated_128)
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
                 # Assuming time dimension is 'time'
