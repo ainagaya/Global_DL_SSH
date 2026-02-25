@@ -134,7 +134,7 @@ def rescale_y(tensor):
 
 
 class TACO_Dataset(Dataset):
-    def __init__(self, taco_dict, split='train', sequence_length=5, n_samples=None):
+    def __init__(self, taco_dict, split='train', sequence_length=1, n_samples=None):
         """
         Args:
             taco_dict: Dictionary of xarray datasets (one per data source)
