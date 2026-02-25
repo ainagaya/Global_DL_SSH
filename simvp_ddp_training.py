@@ -228,6 +228,9 @@ class TACO_Dataset(Dataset):
 
         if input_tensor.ndim == 4:
            input_tensor = input_tensor.unsqueeze(0)  # (1, T, C, H, W)
+
+        if output_tensor.ndim == 3:  # (T, n_obs, 3)
+            output_tensor = output_tensor.unsqueeze(0)  # (1, T, n_obs, 3)
         
         return input_tensor, output_tensor
 
