@@ -164,7 +164,7 @@ class TACO_Dataset(Dataset):
         lon_new = np.linspace(float(LON_MIN), float(LON_MAX), 128)
         
         # Build list of valid (source, time_idx) pairs
-        merged = {}
+        self.merged = {}
         for source in self.data_sources:
             ds = nc_datasets[source]
             ds_merged = []
@@ -186,10 +186,10 @@ class TACO_Dataset(Dataset):
                 # Assuming time dimension is 'time'
                 # print("ds.time:", ds.time)
                 # merge datasets for each day into single dataset
-                merged[source] = xr.concat(ds_merged, dim="time").sortby("time")
-                t = merged[source].coords["time"].values
+                self.merged[source] = xr.concat(ds_merged, dim="time").sortby("time")
+                t = self.merged[source].coords["time"].values
                 print("Time coordinate values for source", source, ":", t)
-                n_time = merged[source].dims['time']
+                n_time = self.merged[source].dims['time']
                 # try:
                 #     n_time = merged[source].dims['time']
                 # except KeyError:
@@ -202,7 +202,7 @@ class TACO_Dataset(Dataset):
 
             print(f"Total samples for split '{self.split}': {len(self.sample_indices)}")
 
-        return merged
+        return self.merged
             
     def __len__(self):
         return len(self.sample_indices)
@@ -215,12 +215,12 @@ class TACO_Dataset(Dataset):
         # Assuming: 'ssh' = gridded SSH, 'ssh_obs' = observations with lat/lon/value
 
         # Input: gridded SSH for sequence_length timesteps
-        input_data = self.ds['l3_ssh.nc']["sla_filtered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+        input_data = self.merged['l3_ssh.nc']["sla_filtered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
         # print(f"Input data shape for source {source} at time index {t_idx}: {input_data.shape}. Input data: {input_data}")
         # Shape: (sequence_length, lat, lon)
         
         # Output: SWOT-like data
-        output_data = self.ds['l3_swot.nc']["ssha_unfiltered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
+        output_data = self.merged['l3_swot.nc']["ssha_unfiltered"].isel(time=slice(t_idx, t_idx + self.sequence_length)).values
         # print(f"Output data shape for source {source} at time index {t_idx}: {output_data.shape}. Output data: {output_data}")
         # Shape: (sequence_length, n_obs, 3) where 3 = [x, y, value]
         
