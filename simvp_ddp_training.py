@@ -136,7 +136,7 @@ def rescale_y(tensor):
 
 
 class TACO_Dataset(Dataset):
-    def __init__(self, taco_dict, split='train', sequence_length=5, n_samples=None):
+    def __init__(self, datasets, split='train', sequence_length=5, n_samples=None):
         """
         Args:
             taco_dict: Dictionary of xarray datasets (one per data source)
@@ -144,19 +144,19 @@ class TACO_Dataset(Dataset):
             sequence_length: Number of time steps per sample (default 30)
             n_samples: Number of samples to use (None = use all)
         """
-        self.taco_dict = taco_dict
+        self.ds = datasets
         self.split = split
         self.sequence_length = sequence_length
 
         # Collect all data sources and indices
-        
+
         self.sample_indices = []
         self.n_samples = n_samples
 
     def download_and_preprocess(self):
         print("Downloading files ...")
-        print("Files to download:", self.taco_dict)
-        nc_datasets = download_all(self.taco_dict)
+        print("Files to download:", self.ds)
+        nc_datasets = download_all(self.ds)
         print(f"\nLoaded {len(nc_datasets)} datasets")
 
         self.data_sources = list(nc_datasets.keys())
