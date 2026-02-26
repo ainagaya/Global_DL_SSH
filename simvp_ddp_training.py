@@ -169,13 +169,12 @@ class TACO_Dataset(Dataset):
             ds = nc_datasets[source]
             ds_merged = []
             if source == "l3_swot.nc" or source == "l3_ssh.nc":
+                i = 0
                 for daily_dataset in ds:
                 # print(f"Processing {source} with dimensions {ds.dims}.")
-                    print("Storing original dataset for source:", source)
-                    type(daily_dataset)
-                    exit()
-
-
+                    print("Storing original dataset for source (xarray):", source)
+                    daily_dataset.to_netcdf(f"{i}_{source}_original.nc")
+                    i += 1
                     print("Merging tracks and adding time dimension for source:", source)
                     date = daily_dataset.attrs.get("date")
                     print(f"Date for {source}, {daily_dataset}: {date}")
@@ -187,6 +186,7 @@ class TACO_Dataset(Dataset):
                     daily_dataset_interpolated_128 = ds_cropped.interp(lat=lat_new, lon=lon_new, method="linear")
                     daily_dataset_interpolated_128 = daily_dataset_interpolated_128.fillna(0)
                     ds_merged.append(daily_dataset_interpolated_128)
+                    daily_dataset_interpolated_128.to_netcdf(f"{i}_{source}_interpolated.nc")
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
                     print(f"Number of non-zero values in {source}: {daily_dataset_interpolated_128.sum().values}")
                 # print("ds.time:", ds.time)
