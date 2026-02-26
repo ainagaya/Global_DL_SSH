@@ -171,6 +171,11 @@ class TACO_Dataset(Dataset):
             if source == "l3_swot.nc" or source == "l3_ssh.nc":
                 for daily_dataset in ds:
                 # print(f"Processing {source} with dimensions {ds.dims}.")
+                    print("Storing original dataset for source:", source)
+                    type(daily_dataset)
+                    exit()
+
+
                     print("Merging tracks and adding time dimension for source:", source)
                     date = daily_dataset.attrs.get("date")
                     print(f"Date for {source}, {daily_dataset}: {date}")
