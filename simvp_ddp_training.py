@@ -183,7 +183,7 @@ class TACO_Dataset(Dataset):
                     daily_dataset_interpolated_128 = daily_dataset_interpolated_128.fillna(0)
                     ds_merged.append(daily_dataset_interpolated_128)
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
-                # Assuming time dimension is 'time'
+                    print(f"Number of non-zero values in {source}: {daily_dataset_interpolated_128.sum().values}")
                 # print("ds.time:", ds.time)
                 # merge datasets for each day into single dataset
                 self.merged[source] = xr.concat(ds_merged, dim="time").sortby("time")
@@ -385,12 +385,15 @@ def train(rank, world_size, checkpoint_path=None):
     train_dataset.download_and_preprocess()
     store_dataset_path = Path("train_dataset.pt")
     print(train_dataset)
-    X, Y = train_dataset[0]  # Get the first sample (input and output tensors)
-    print(f"Input tensor shape: {X.shape}, Output tensor shape: {Y.shape}")
+    for i in range(len(train_dataset)):
+        X, Y = train_dataset[i]  # Get each sample (input and output tensors)
+        print(f"Sample {i}: Input tensor shape: {X.shape}, Output tensor shape: {Y.shape}")
+        torch.save({"X": X.detach().cpu(), "Y": Y.detach().cpu(), "index": i}, store_dataset_path.with_name(f"train_sample_{i}.pt"))
 
-    torch.save({"X": X.detach().cpu(), "Y": Y.detach().cpu(), "index": 0}, store_dataset_path)
+        print(f"Saved sample {i} of training dataset to {store_dataset_path}") 
+        print(f"Non-zero values in input tensor: {(X != 0).sum().item()}, Non-zero values in output tensor: {(Y != 0).sum().item()}")
 
-    print(f"Saved first sample of training dataset to {store_dataset_path}") 
+    exit()
 
     # Plot train dataset
     
