@@ -149,7 +149,7 @@ class TACO_Dataset(Dataset):
         self.sequence_length = sequence_length
 
         # Collect all data sources and indices
-        self.data_sources = list(nc_datasets.keys())
+        
         self.sample_indices = []
         self.n_samples = n_samples
 
@@ -158,6 +158,8 @@ class TACO_Dataset(Dataset):
         print("Files to download:", self.taco_dict)
         nc_datasets = download_all(self.taco_dict)
         print(f"\nLoaded {len(nc_datasets)} datasets")
+
+        self.data_sources = list(nc_datasets.keys())
 
         lat_new = np.linspace(float(LAT_MIN), float(LAT_MAX), 128)
         lon_new = np.linspace(float(LON_MIN), float(LON_MAX), 128)
