@@ -28,6 +28,8 @@ import xarray as xr
 
 import tacoreader
 
+from pathlib import Path
+
 import requests, io, xarray as xr
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -146,14 +148,16 @@ class TACO_Dataset(Dataset):
         self.split = split
         self.sequence_length = sequence_length
 
-        print("Downloading files ...")
-        print("Files to download:", taco_dict)
-        nc_datasets = download_all(taco_dict)
-        print(f"\nLoaded {len(nc_datasets)} datasets")
-
         # Collect all data sources and indices
         self.data_sources = list(nc_datasets.keys())
         self.sample_indices = []
+        self.n_samples = n_samples
+
+    def download_and_preprocess(self):
+        print("Downloading files ...")
+        print("Files to download:", self.taco_dict)
+        nc_datasets = download_all(self.taco_dict)
+        print(f"\nLoaded {len(nc_datasets)} datasets")
 
         lat_new = np.linspace(float(LAT_MIN), float(LAT_MAX), 128)
         lon_new = np.linspace(float(LON_MIN), float(LON_MAX), 128)
@@ -189,15 +193,15 @@ class TACO_Dataset(Dataset):
                 #     n_time = merged[source].dims['time']
                 # except KeyError:
                 #     n_time = 1  # If no time dimension, treat as single time step
-                for t_idx in range(n_time - sequence_length):
+                for t_idx in range(n_time - self.sequence_length):
                     self.sample_indices.append((source, t_idx))
             
-            if n_samples is not None:
-                self.sample_indices = self.sample_indices[:n_samples]
+            if self.n_samples is not None:
+                self.sample_indices = self.sample_indices[:self.n_samples]
 
-            print(f"Total samples for split '{split}': {len(self.sample_indices)}")
+            print(f"Total samples for split '{self.split}': {len(self.sample_indices)}")
 
-        self.ds = merged
+        return merged
             
     def __len__(self):
         return len(self.sample_indices)
@@ -234,7 +238,6 @@ class TACO_Dataset(Dataset):
             output_tensor = output_tensor.unsqueeze(0)  # (1, T, n_obs, 3)
         
         return input_tensor, output_tensor
-
     
 
     @staticmethod
@@ -378,6 +381,17 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
     train_dataset = TACO_Dataset(training_files, split="train")
+    train_dataset.download_and_preprocess()
+    store_dataset_path = Path("train_dataset.pt")
+    X, Y = train_dataset[0]  # Get the first sample (input and output tensors)
+    print(f"Input tensor shape: {X.shape}, Output tensor shape: {Y.shape}")
+
+    torch.save({"X": X.detach().cpu(), "Y": Y.detach().cpu(), "index": 0}, store_dataset_path)
+
+    print(f"Saved first sample of training dataset to {store_dataset_path}") 
+
+    # Plot train dataset
+    
 
     # val_files = os.listdir(val_dir)
     # val_dataset_files = [val_dir+f for f in val_files if '.tfrecord' in f]
@@ -396,6 +410,7 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
     val_dataset = TACO_Dataset(val_files, split="val")
+    val_dataset.download_and_preprocess()
     
     # viz_files = os.listdir(val_dir)
     # viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
@@ -412,6 +427,7 @@ def train(rank, world_size, checkpoint_path=None):
         AND "l1:id" LIKE '%NORTH_PACIFIC_EAST%'
         """)
     viz_dataset = TACO_Dataset(viz_files, split="viz")
+    viz_dataset.download_and_preprocess()
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
