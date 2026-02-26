@@ -149,7 +149,6 @@ class TACO_Dataset(Dataset):
         self.sequence_length = sequence_length
 
         # Collect all data sources and indices
-
         self.sample_indices = []
         self.n_samples = n_samples
 
@@ -385,6 +384,7 @@ def train(rank, world_size, checkpoint_path=None):
     train_dataset = TACO_Dataset(training_files, split="train")
     train_dataset.download_and_preprocess()
     store_dataset_path = Path("train_dataset.pt")
+    print(train_dataset)
     X, Y = train_dataset[0]  # Get the first sample (input and output tensors)
     print(f"Input tensor shape: {X.shape}, Output tensor shape: {Y.shape}")
 
