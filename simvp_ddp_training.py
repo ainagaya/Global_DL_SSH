@@ -173,7 +173,10 @@ class TACO_Dataset(Dataset):
                 for daily_dataset in ds:
                 # print(f"Processing {source} with dimensions {ds.dims}.")
                     print("Storing original dataset for source (xarray):", source)
-                    daily_dataset.to_netcdf(f"{i}_{source}_original.nc")
+                    print(type(daily_dataset))
+                    print(f"Original dataset dimensions for {source}: {daily_dataset.dims}.")
+                    print(daily_dataset)
+                    # daily_dataset.to_netcdf(f"{i}_{source}_original.nc")
                     i += 1
                     print("Merging tracks and adding time dimension for source:", source)
                     date = daily_dataset.attrs.get("date")
@@ -186,7 +189,7 @@ class TACO_Dataset(Dataset):
                     daily_dataset_interpolated_128 = ds_cropped.interp(lat=lat_new, lon=lon_new, method="linear")
                     daily_dataset_interpolated_128 = daily_dataset_interpolated_128.fillna(0)
                     ds_merged.append(daily_dataset_interpolated_128)
-                    daily_dataset_interpolated_128.to_netcdf(f"{i}_{source}_interpolated.nc")
+                    # daily_dataset_interpolated_128.to_netcdf(f"{i}_{source}_interpolated.nc")
                     print(f"After merging tracks, {source} dimensions: {daily_dataset_time.dims}.")
                     print(f"Number of non-zero values in {source}: {daily_dataset_interpolated_128.sum().values}")
                 # print("ds.time:", ds.time)
@@ -374,8 +377,8 @@ def train(rank, world_size, checkpoint_path=None):
     # train_dataset_files = train_dataset_files[:n_train_batches]
     # n_train_batches=len(train_dataset_files)
 
-    TRAIN_START_DATE = "2023-05-01"
-    TRAIN_END_DATE = "2023-05-15"
+    TRAIN_START_DATE = "2024-05-01"
+    TRAIN_END_DATE = "2024-05-15"
 
     training_files = dataset.sql(f"""
         SELECT
@@ -407,8 +410,8 @@ def train(rank, world_size, checkpoint_path=None):
     # val_dataset_files = [val_dir+f for f in val_files if '.tfrecord' in f]
     # val_dataset_files = val_dataset_files[:n_val_batches]
 
-    VAL_START_DATE = "2023-06-01"
-    VAL_END_DATE = "2023-06-15"
+    VAL_START_DATE = "2024-06-01"
+    VAL_END_DATE = "2024-06-15"
 
     val_files = dataset.sql(f"""
         SELECT
@@ -425,8 +428,8 @@ def train(rank, world_size, checkpoint_path=None):
     # viz_files = os.listdir(val_dir)
     # viz_dataset_files = [val_dir+f for f in viz_files if '.tfrecord' in f]
     # viz_dataset_files = viz_dataset_files[:4]
-    VIZ_START_DATE = "2023-07-01"
-    VIZ_END_DATE = "2023-07-15"
+    VIZ_START_DATE = "2024-07-01"
+    VIZ_END_DATE = "2024-07-15"
     viz_files = dataset.sql(f"""
         SELECT
             "l2:id" AS id,
