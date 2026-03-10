@@ -212,7 +212,7 @@ n_obs_max = 400 # max number of SSH observations on any day in loss function, al
 n_train_samples = 1000000
 experiment_name = f'simvp_ssh_sst_ns{n_train_samples}_global_'
 num_epochs = 50
-workers_per_gpu = 8 # sets the number of CPU processes used per GPU to parallelise the data loading/pre-processing
+workers_per_gpu = 1 # sets the number of CPU processes used per GPU to parallelise the data loading/pre-processing
             
 frames = n_t
 
@@ -250,6 +250,9 @@ def train(rank, world_size, checkpoint_path=None):
     viz_sampler = torch.utils.data.distributed.DistributedSampler(viz_dataset)
     
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers=workers_per_gpu, sampler=train_sampler)
+
+    print("Train loader: ", train_loader)
+    
     val_loader = torch.utils.data.DataLoader(val_dataset, num_workers=workers_per_gpu, sampler=val_sampler)
     viz_loader = torch.utils.data.DataLoader(viz_dataset, num_workers=workers_per_gpu, sampler=viz_sampler)
     
@@ -281,6 +284,7 @@ def train(rank, world_size, checkpoint_path=None):
         model.train()
         train_loss = 0.0
         num_batches=0
+        
         for torch_input_batch, torch_output_batch in train_loader:
             optimizer.zero_grad(set_to_none=True)
             torch_input_batch = torch_input_batch.squeeze(0).to(rank)
@@ -352,7 +356,8 @@ def train(rank, world_size, checkpoint_path=None):
 
 if __name__ == "__main__":
     # num_processes = number of GPUs (currently need to be on same node)
-    num_processes = torch.cuda.device_count()
+    # num_processes = torch.cuda.device_count()
+    num_processes = 1
     print(f'Number of GPUs used: {num_processes}')
 
     mp.spawn(train, args=(num_processes,), nprocs=num_processes,)  # add checkpoint file name here if restarting training
