@@ -44,62 +44,54 @@ def load_and_preprocess_batch(file_path):
 @tf.function
 def parse_example(serialized_example):
     feature_description = {
-        'input': tf.io.FixedLenFeature(int(batch_size*n_t*n*n*2), tf.float32),
+        'input': tf.io.FixedLenFeature(int(batch_size*(n_t+1)*n*n*2), tf.float32),
         'output': tf.io.FixedLenFeature(int(batch_size*n_t*n_obs_max*3), tf.float32)
     }
-    try:
-        example = tf.io.parse_single_example(serialized_example, feature_description)
 
-        input_data = tf.reshape(example['input'], [batch_size,n_t,n,n,2])
-        input_data = normalise_ssh(input_data)
-        input_data = tf.transpose(tf.reshape(input_data,[batch_size,n_t,n,n,1]),perm=[0,1,4,2,3])
+    example = tf.io.parse_single_example(serialized_example, feature_description)
 
-        output_data = tf.reshape(example['output'], [batch_size,n_t,n_obs_max,3])
+    input_data = tf.reshape(example['input'], [batch_size,n_t,n,n,2])
+    input_data = normalise_ssh(input_data)
+    input_data = tf.transpose(tf.reshape(input_data,[batch_size,n_t,n,n,1]),perm=[0,1,4,2,3])
 
-        x = output_data[:,:,:,0]
-        x_new = rescale_x(x)
-        y = output_data[:,:,:,1]
-        y_new = rescale_y(y)
-        sla = output_data[:,:,:,2]
-        sla_new = normalise_ssh(sla)
+    output_data = tf.reshape(example['output'], [batch_size,n_t,n_obs_max,3])
 
-        outvar = tf.stack((x_new,y_new,sla_new),axis = -1)
-        
-    except:
-        tf.print('File: '+serialized_example+' is corrupted')
-        input_data = tf.zeros([batch_size,n_t,1,n,n],tf.float32)
-        outvar = tf.zeros([batch_size,n_t,n_obs_max,3],tf.float32)
+    x = output_data[:,:,:,0]
+    x_new = rescale_x(x)
+    y = output_data[:,:,:,1]
+    y_new = rescale_y(y)
+    sla = output_data[:,:,:,2]
+    sla_new = normalise_ssh(sla)
+
+    outvar = tf.stack((x_new,y_new,sla_new),axis = -1)
 
     return input_data, outvar
 
 @tf.function
 def parse_example_sst(serialized_example):
     feature_description = {
-        'input': tf.io.FixedLenFeature(int(batch_size*n_t*n*n*2), tf.float32),
+        'input': tf.io.FixedLenFeature(int(batch_size*(n_t+1)*n*n*2), tf.float32),
         'output': tf.io.FixedLenFeature(int(batch_size*n_t*n_obs_max*3), tf.float32)
     }
-    try:
-        example = tf.io.parse_single_example(serialized_example, feature_description)
 
-        input_data = tf.reshape(example['input'], [batch_size,n_t,n,n,2])
-        input_data_ssh = normalise_ssh(input_data[:,:,:,:,0])
-        input_data_sst = normalise_sst(input_data[:,:,:,:,1])
-        input_data = tf.transpose(tf.stack((input_data_ssh,input_data_sst),axis=-1),perm=[0,1,4,2,3])
-        output_data = tf.reshape(example['output'], [batch_size,n_t,n_obs_max,3])
+    example = tf.io.parse_single_example(serialized_example, feature_description)
 
-        x = output_data[:,:,:,0]
-        x_new = rescale_x(x)
-        y = output_data[:,:,:,1]
-        y_new = rescale_y(y)
-        sla = output_data[:,:,:,2]
-        sla_new = normalise_ssh(sla)
+    input_data = tf.reshape(example['input'], [batch_size,n_t+1,n,n,2])
+    input_data = input_data[:, :n_t, :, :, :]  # drop the unused extra timestep
 
-        outvar = tf.stack((x_new,y_new,sla_new),axis = -1)
-    except:
-        tf.print('File is corrupted')
-        input_data = tf.zeros([batch_size,n_t,2,n,n],tf.float32)
-        outvar = tf.zeros([batch_size,n_t,n_obs_max,3],tf.float32)
-        
+    input_data_ssh = normalise_ssh(input_data[:,:,:,:,0])
+    input_data_sst = normalise_sst(input_data[:,:,:,:,1])
+    input_data = tf.transpose(tf.stack((input_data_ssh,input_data_sst),axis=-1),perm=[0,1,4,2,3])
+    output_data = tf.reshape(example['output'], [batch_size,n_t,n_obs_max,3])
+
+    x = output_data[:,:,:,0]
+    x_new = rescale_x(x)
+    y = output_data[:,:,:,1]
+    y_new = rescale_y(y)
+    sla = output_data[:,:,:,2]
+    sla_new = normalise_ssh(sla)
+
+    outvar = tf.stack((x_new,y_new,sla_new),axis = -1)
 
     return input_data, outvar
 
@@ -216,6 +208,118 @@ workers_per_gpu = 1 # sets the number of CPU processes used per GPU to paralleli
             
 frames = n_t
 
+def check_batch(invar, outvar, batch_idx, verbose=True):
+    """
+    Returns True if batch is clean, False if it has issues.
+    """
+    issues = []
+
+    # Check for NaN/Inf in inputs
+    if torch.isnan(invar).any():
+        issues.append(f"NaN in input: {torch.isnan(invar).sum().item()} values out of {invar.numel()}")
+    if torch.isinf(invar).any():
+        issues.append(f"Inf in input: {torch.isinf(invar).sum().item()} values out of {invar.numel()}")
+
+    # Check for NaN/Inf in outputs
+    if torch.isnan(outvar).any():
+        issues.append(f"NaN in output: {torch.isnan(outvar).sum().item()} values out of {outvar.numel()}")
+    if torch.isinf(outvar).any():
+        issues.append(f"Inf in output: {torch.isinf(outvar).sum().item()} values out of {outvar.numel()}")
+
+    # Check input value ranges (after normalisation, expect roughly -5 to 5)
+    nonzero_input = invar[invar != 0]
+    if len(nonzero_input) > 0:
+        if verbose:
+            print(f"  Input  | nonzero: {len(nonzero_input):>10} | "
+                  f"min={nonzero_input.min():.3f} max={nonzero_input.max():.3f} "
+                  f"mean={nonzero_input.mean():.3f} std={nonzero_input.std():.3f}")
+    else:
+        issues.append("Input is ALL ZEROS")
+
+    # Check output SSH values (column 2, should be normalised ~-5 to 5)
+    sla = outvar[:, :, :, 2]
+    nonzero_sla = sla[sla != 0]
+    if len(nonzero_sla) > 0:
+        if verbose:
+            print(f"  Output SLA | nonzero: {len(nonzero_sla):>8} | "
+                  f"min={nonzero_sla.min():.3f} max={nonzero_sla.max():.3f} "
+                  f"mean={nonzero_sla.mean():.3f}")
+    else:
+        issues.append("Output SLA is ALL ZEROS (no observations?)")
+
+    # Check x/y coordinate ranges (should be 0 to 127 after rescaling)
+    x_coords = outvar[:, :, :, 0]
+    y_coords = outvar[:, :, :, 1]
+    nonzero_x = x_coords[x_coords != 0]
+    nonzero_y = y_coords[y_coords != 0]
+    if len(nonzero_x) > 0:
+        if verbose:
+            print(f"  Output x   | nonzero: {len(nonzero_x):>8} | "
+                  f"min={nonzero_x.min():.1f} max={nonzero_x.max():.1f}")
+            print(f"  Output y   | nonzero: {len(nonzero_y):>8} | "
+                  f"min={nonzero_y.min():.1f} max={nonzero_y.max():.1f}")
+    else:
+        issues.append("Output x/y coords are ALL ZEROS (no observations?)")
+
+    # Fraction of zero-padded observations
+    obs_mask = (outvar[:, :, :, 2] != 0)
+    frac_valid = obs_mask.float().mean().item()
+    if frac_valid < 0.01:
+        issues.append(f"Only {frac_valid*100:.2f}% of observations are non-zero — very sparse")
+    elif verbose:
+        print(f"  Valid obs fraction: {frac_valid*100:.1f}%")
+
+    if issues:
+        print(f"[Batch {batch_idx}] ISSUES FOUND:")
+        for issue in issues:
+            print(f"  !! {issue}")
+        return False
+    elif verbose:
+        print(f"[Batch {batch_idx}] OK")
+    return True
+
+
+def run_pre_training_checks(train_loader, val_loader, rank, n_batches=5):
+    """
+    Run before training. Checks first n_batches from train and val loaders.
+    """
+    print("\n" + "="*60)
+    print("PRE-TRAINING DATA CHECKS")
+    print("="*60)
+
+    all_clean = True
+
+    print(f"\n-- Checking {n_batches} training batches --")
+    for i, (invar, outvar) in enumerate(train_loader):
+        if i >= n_batches:
+            break
+        invar = invar.squeeze(0).to(rank)
+        outvar = outvar.squeeze(0).to(rank)
+        print(f"\nBatch {i} | input shape: {tuple(invar.shape)} | output shape: {tuple(outvar.shape)}")
+        clean = check_batch(invar, outvar, i)
+        if not clean:
+            all_clean = False
+
+    print(f"\n-- Checking {n_batches} validation batches --")
+    for i, (invar, outvar) in enumerate(val_loader):
+        if i >= n_batches:
+            break
+        invar = invar.squeeze(0).to(rank)
+        outvar = outvar.squeeze(0).to(rank)
+        print(f"\nBatch {i} | input shape: {tuple(invar.shape)} | output shape: {tuple(outvar.shape)}")
+        clean = check_batch(invar, outvar, i)
+        if not clean:
+            all_clean = False
+
+    print("\n" + "="*60)
+    if all_clean:
+        print("All checks passed. Safe to train.")
+    else:
+        print("WARNING: Issues found. Investigate before training.")
+    print("="*60 + "\n")
+
+    return all_clean
+
 def train(rank, world_size, checkpoint_path=None):
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
     
@@ -279,6 +383,14 @@ def train(rank, world_size, checkpoint_path=None):
         total_training_steps = int(num_epochs*n_train_batches)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,max_lr=lr,total_steps=total_training_steps)
 
+    # --- ADD THIS after building loaders ---
+    if rank == 0:
+        clean = run_pre_training_checks(train_loader, val_loader, rank, n_batches=5)
+        if not clean:
+            print("Aborting training due to data issues.")
+            dist.destroy_process_group()
+            return
+
     for epoch in range(start_epoch, num_epochs):
         #training loop
         model.train()
@@ -288,17 +400,27 @@ def train(rank, world_size, checkpoint_path=None):
         for torch_input_batch, torch_output_batch in train_loader:
             optimizer.zero_grad(set_to_none=True)
             torch_input_batch = torch_input_batch.squeeze(0).to(rank)
-            torch_output_batch = torch_output_batch.squeeze(0).to(rank)            
+            torch_output_batch = torch_output_batch.squeeze(0).to(rank)
+
             with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
                 outputs = model(torch_input_batch)
                 loss = criterion(outputs, torch_output_batch)
 
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"[Epoch {epoch} Batch {num_batches}] NaN/Inf loss detected — skipping batch")
+                # Check if it's the model outputs or the targets causing it
+                print(f"  model output: nan={torch.isnan(outputs).sum().item()} inf={torch.isinf(outputs).sum().item()}")
+                print(f"  target:       nan={torch.isnan(torch_output_batch).sum().item()} inf={torch.isinf(torch_output_batch).sum().item()}")
+                print(f"  scaler scale: {scaler.get_scale()}")
+                continue  # skip this batch rather than propagating NaN through weights
+
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # guard against exploding gradients
             scheduler.step()
             scaler.step(optimizer)
             scaler.update()
-                
+
             train_loss += loss.item()
             num_batches += 1
 

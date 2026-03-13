@@ -78,18 +78,6 @@ def bin_ssh(data_tracks, L_x, L_y, n, n_sats_max, filtered=False):
     # TODO cut this into regions?¿
     # input_grid = data_tracks['ssha_filtered'].values  # Convert to numpy
 
-    # quick plot
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize=(10, 5))
-    # ssh_plot = data_tracks.values
-    # plt.imshow(ssh_plot, origin='lower')
-    # plt.colorbar(label='SSH')
-    # plt.title('Original SSH Data')
-    # plt.xlabel('Longitude Index')
-    # plt.ylabel('Latitude Index')
-    # plt.savefig('original_ssh_data.png')
-    # plt.close()
-
     # Extract coordinates and create meshgrid
     lats_1d = data_tracks.coords['lat'].to_numpy()
     lons_1d = data_tracks.coords['lon'].to_numpy()
@@ -120,17 +108,9 @@ def bin_ssh(data_tracks, L_x, L_y, n, n_sats_max, filtered=False):
     input_grid = np.rot90(input_grid)
     input_grid[np.isnan(input_grid)] = 0
 
-    # quick plot to check binned data looks correct:
-    # plt.figure(figsize=(10, 5))
-    # plt.imshow(input_grid, origin='lower')
-    # plt.colorbar(label='Binned SSH')
-    # plt.title('Binned SSH Data')
-    # plt.xlabel('Longitude Bin')
-    # plt.ylabel('Latitude Bin')
-    # plt.savefig('binned_ssh_data.png')
-    # plt.close()    
-    # For output tracks (raw observations)
     output_tracks = np.stack((lons_flat, lats_flat, values_flat), axis=-1)
+
+    output_tracks[np.isnan(output_tracks)] = 0
     
     return input_grid, output_tracks
 
@@ -253,6 +233,7 @@ if train_dates == []:
 
 save_regions = True
 mode = 'training' # 'validation'
+# mode = "validation"
 domain = 'global'
 if mode == 'training':
     print('Processing training data...')
@@ -277,6 +258,7 @@ def save_batch(batch):
     batch_no = batch
     filename = save_dir+f'/batch_{batch_no}.tfrecord'
 
+    # WHY this +1???
     input_data_final = np.zeros((batch_size,N_t+1,n,n,2))
     output_npy = np.zeros((batch_size,N_t,n_obs_max,3))
     max_lengths = []
@@ -318,8 +300,10 @@ def save_batch(batch):
                     )
                     """)
                 nc_datasets = download_all(files)
+
                 try:
                     data_tracks = nc_datasets["l3_swot.nc"]["ssha_filtered"]
+                    print("2", data_tracks.dims)
                 except KeyError:
                     print(f"No SWOT data in {date_loop}")
                 try:
@@ -336,6 +320,9 @@ def save_batch(batch):
                 print(f"Region {r} with center lat {lat_center} and lon {lon_center} has lat range {lat_min} to {lat_max} and lon range {lon_min} to {lon_max}")
 
                 data_tracks = data_tracks.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
+
+                ## print number of traks there are present
+                print("3", data_tracks.dims)
                 
                 if len(data_tracks)>0:
                     input_ssh, output_ssh = bin_ssh(data_tracks,L_x,L_y, n, n_sats_max, filtered)
