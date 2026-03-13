@@ -56,7 +56,7 @@ def parse_example(serialized_example):
     return input_data, output_data
 
 # take available along-track altimetry, randomly select up to n_sats_max sats on each day to use as input, bin average input sats onto zero-padded grid, save output sat(s) un-binned for use in loss function:
-def bin_ssh(data_tracks, L_x, L_y, n, n_sats_max, filtered=False):
+def bin_swot(data_tracks, L_x, L_y, n, n_sats_max, filtered=False):
     """
     Extract gridded SSH and raw tracks from xarray Dataset
     
@@ -107,13 +107,19 @@ def bin_ssh(data_tracks, L_x, L_y, n, n_sats_max, filtered=False):
     # Rotate to correct orientation
     input_grid = np.rot90(input_grid)
     input_grid[np.isnan(input_grid)] = 0
+    
+    return input_grid
+
+# take available along-track altimetry, randomly select up to n_sats_max sats on each day to use as input, bin average input sats onto zero-padded grid, save output sat(s) un-binned for use in loss function:
+def bin_ssh(data_tracks,L_x,L_y, n, n_sats_max, filtered = False):
+
+    input_grid = bin_sst(data_tracks, L_x, L_y, n)
+    
+    return input_grid
 
     output_tracks = np.stack((lons_flat, lats_flat, values_flat), axis=-1)
 
     output_tracks[np.isnan(output_tracks)] = 0
-    
-    return input_grid, output_tracks
-
 def bin_sst(sst_data, L_x, L_y, n):
     """
     Bin lat-lon SST data onto regular grid
@@ -297,13 +303,16 @@ def save_batch(batch):
                         "l2:id" LIKE '%l3_swot.nc'
                         OR
                         "l2:id" LIKE '%l3_sst.nc'
+                        OR
+                        "l2:id" LIKE '%l3_ssh.nc'
                     )
                     """)
                 nc_datasets = download_all(files)
 
                 try:
-                    data_tracks = nc_datasets["l3_swot.nc"]["ssha_filtered"]
-                    print("2", data_tracks.dims)
+                    swot_tracks = nc_datasets["l3_swot.nc"]["ssha_filtered"]
+                    ssh_tracks = nc_datasets["l3_ssh.nc"]["sla_filtered"]
+                    print("2", swot_tracks.dims)
                 except KeyError:
                     print(f"No SWOT data in {date_loop}")
                 try:
@@ -319,13 +328,13 @@ def save_batch(batch):
                 
                 print(f"Region {r} with center lat {lat_center} and lon {lon_center} has lat range {lat_min} to {lat_max} and lon range {lon_min} to {lon_max}")
 
-                data_tracks = data_tracks.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
-
-                ## print number of traks there are present
-                print("3", data_tracks.dims)
+                swot_tracks = swot_tracks.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
+                ssh_tracks = ssh_tracks.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
                 
-                if len(data_tracks)>0:
-                    input_ssh, output_ssh = bin_ssh(data_tracks,L_x,L_y, n, n_sats_max, filtered)
+                
+                if len(swot_tracks)>0:
+                    input_ssh = bin_ssh(ssh_tracks,L_x,L_y, n, n_sats_max, filtered)
+                    output_ssh = bin_swot(swot_tracks,L_x,L_y, n, n_sats_max, filtered)
                     n_tot+=1
                 else:
                     input_ssh = np.zeros((n,n))
