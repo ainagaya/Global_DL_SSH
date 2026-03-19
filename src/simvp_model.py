@@ -7,6 +7,8 @@ from modules import (ConvSC, ConvNeXtSubBlock, ConvMixerSubBlock, GASubBlock, gI
                              HorNetSubBlock, MLPMixerSubBlock, MogaSubBlock, PoolFormerSubBlock,
                              SwinSubBlock, UniformerSubBlock, VANSubBlock, ViTSubBlock, TAUSubBlock, ConvSC_ReLUResNet)
 
+import torch.nn.functional as F
+
 
 class SimVP_Model_no_skip(nn.Module):
     r"""SimVP Model
