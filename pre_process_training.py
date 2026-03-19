@@ -113,9 +113,9 @@ def bin_swot(data_tracks, L_x, L_y, n, n_sats_max, filtered=False):
 # take available along-track altimetry, randomly select up to n_sats_max sats on each day to use as input, bin average input sats onto zero-padded grid, save output sat(s) un-binned for use in loss function:
 def bin_ssh(data_tracks,L_x,L_y, n, n_sats_max, filtered = False):
 
-    input_grid = bin_sst(data_tracks, L_x, L_y, n)
+    _, out_grid = bin_sst(data_tracks, L_x, L_y, n)
     
-    return input_grid
+    return out_grid
 
     output_tracks = np.stack((lons_flat, lats_flat, values_flat), axis=-1)
 
@@ -157,7 +157,7 @@ def bin_sst(sst_data, L_x, L_y, n):
     # Check if all values are NaN
     if len(values_flat) == 0:
         print("All SST values are NaN, returning zero grid.")
-        return np.zeros((n, n))
+        return np.zeros((n, n)), np.empty((0, 3))
     
     # Bin onto grid
     sst_grid, _, _, _ = stats.binned_statistic_2d(
@@ -180,8 +180,12 @@ def bin_sst(sst_data, L_x, L_y, n):
     # plt.ylabel('Latitude Bin')
     # plt.savefig('binned_sst_data.png')
     # plt.close()
+
+    output_tracks = np.stack((lons_flat, lats_flat, values_flat), axis=-1)
+
+    output_tracks[np.isnan(output_tracks)] = 0
     
-    return sst_grid
+    return sst_grid, output_tracks
 
 
 batch_size = 25
@@ -194,7 +198,7 @@ n_sats_max = 6 # maximum number of altimeters to use in input
 filtered = False # whether to use the 65km band-pass filtered or unfiltered SSH observations
 test_year = 2025
 
-n_regions = 5615
+n_regions = 5
 
 start_date = datetime.date(2024,1,1)
 end_date = datetime.date(2025,12,31)
@@ -257,8 +261,8 @@ if save_regions:
 
 regions_available = np.array([r for r in range(n_regions)])
 
-LAT_MIN, LAT_MAX = 0, 90
-LON_MIN, LON_MAX = 90, 180
+LAT_MIN, LAT_MAX = 0, 5
+LON_MIN, LON_MAX = 90, 95
 
 def save_batch(batch):
     batch_no = batch
@@ -333,15 +337,15 @@ def save_batch(batch):
                 
                 
                 if len(swot_tracks)>0:
-                    input_ssh = bin_ssh(ssh_tracks,L_x,L_y, n, n_sats_max, filtered)
-                    output_ssh = bin_swot(swot_tracks,L_x,L_y, n, n_sats_max, filtered)
+                    input_ssh = bin_swot(swot_tracks,L_x,L_y, n, n_sats_max, filtered)
+                    output_ssh = bin_ssh(ssh_tracks,L_x,L_y, n, n_sats_max, filtered)
                     n_tot+=1
                 else:
                     input_ssh = np.zeros((n,n))
                     output_ssh = np.zeros((1,3))
 
                 sst_loop = sst_loop.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
-                sst_grid = bin_sst(sst_loop, L_x, L_y, n)
+                sst_grid, _ = bin_sst(sst_loop, L_x, L_y, n)
 
                 input_data_final[sample,t_loop,:,:,0] = input_ssh
                 input_data_final[sample,t_loop,:,:,1] = sst_grid

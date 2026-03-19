@@ -13,9 +13,9 @@ def worker(lock, batches):
                 break  # No more directories to process
 
             batch = batches.pop(0)  # Get the next directory
-        available_regions=np.array([i for i in range(5615)])
+        available_regions=np.array([i for i in range(5)])
         print(np.size(available_regions))
-        merge_maps_and_save(pred_dir, pred_file_pattern, batch, output_nc_dir, mask_filename, dist_filename, mdt_filename, network_name, available_regions,L=250e3, crop_pixels=9, dx=7.5e3, with_grads=True, mask_coast_dist=0, lon_min=-180 ,lon_max=180, lat_min=-70, lat_max=80, res=1/10, progress=False)
+        merge_maps_and_save(pred_dir, pred_file_pattern, batch, output_nc_dir, mask_filename, dist_filename, mdt_filename, network_name, available_regions,L=250e3, crop_pixels=9, dx=7.5e3, with_grads=True, mask_coast_dist=0, lon_min=90 ,lon_max=95, lat_min=0, lat_max=5, res=1/10, progress=False)
         gc.collect()
 
 def create_sublists(large_list, n):
@@ -29,9 +29,9 @@ def create_sublists(large_list, n):
 
 if __name__ == '__main__':
     pred_dir = './preds_refactored/'
-    pred_file_pattern = 'simvp_ssh_sst_ns1000000global_pred_nsats6_'
-    pred_dates = [datetime.date(2019,1,1)+datetime.timedelta(days=t) for t in range(365)] 
-    output_nc_dir = './SimVP SSH-SST 1M 6sat grads/'
+    pred_file_pattern = 'simvp_ssh_sst_ns1000000_global__pred_'
+    pred_dates = [datetime.date(2025,1,1)+datetime.timedelta(days=t) for t in range(5)] 
+    output_nc_dir = './SimVP_SSH-SST_1M_grads/'
     os.system("mkdir "+output_nc_dir)
     mask_filename = './land_water_mask_10grid.nc' # find in Harvard Dataverse repo
     dist_filename = './distance_to_nearest_coastlines_10grid.nc' # find in Harvard Dataverse repo

@@ -91,6 +91,74 @@ def move_element_to_last(lst, idx):
     return new_lst
 
 
+def bin_sst(sst_data, L_x, L_y, n):
+    """
+    Bin lat-lon SST data onto regular grid
+    
+    Args:
+        sst_data: xarray.Dataset with 'sst' variable and lat/lon coordinates
+    """
+
+    # quick plot to check data looks correct:
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(10, 5))
+    # sst_plot = sst_data.values
+    # plt.imshow(sst_plot, origin='lower')
+    # plt.colorbar(label='SST')
+    # plt.title('Original SST Data')
+    # plt.xlabel('Longitude Index')
+    # plt.ylabel('Latitude Index')
+    # plt.savefig('original_sst_data.png')
+    # plt.close()
+    # plt.close()
+    # Extract coordinates and create meshgrid
+    lats_1d = sst_data.coords['lat'].to_numpy()
+    lons_1d = sst_data.coords['lon'].to_numpy()
+    
+    # Create 2D meshgrid
+    lon_grid, lat_grid = np.meshgrid(lons_1d, lats_1d)
+    
+    # Flatten all to 1D
+    lats_flat = lat_grid.flatten()
+    lons_flat = lon_grid.flatten()
+    values_flat = sst_data.values.flatten()  # Or whatever SST variable name
+    
+    # Remove NaN values
+    
+    # Check if all values are NaN
+    if len(values_flat) == 0:
+        print("All SST values are NaN, returning zero grid.")
+        return np.zeros((n, n)), np.empty((0, 3))
+    
+    # Bin onto grid
+    sst_grid, _, _, _ = stats.binned_statistic_2d(
+        lons_flat, lats_flat, values_flat,
+        statistic='mean',
+        bins=n,
+        # range=[[-L_x/2, L_x/2], [-L_y/2, L_y/2]]
+    )
+    
+    # Rotate to correct orientation
+    sst_grid = np.rot90(sst_grid)
+    sst_grid[np.isnan(sst_grid)] = 0
+
+    # quick plot to check binned data looks correct:
+    # plt.figure(figsize=(10, 5))
+    # plt.imshow(sst_grid, origin='lower')
+    # plt.colorbar(label='Binned SST')
+    # plt.title('Binned SST Data')
+    # plt.xlabel('Longitude Bin')
+    # plt.ylabel('Latitude Bin')
+    # plt.savefig('binned_sst_data.png')
+    # plt.close()
+
+    output_tracks = np.stack((lons_flat, lats_flat, values_flat), axis=-1)
+
+    output_tracks[np.isnan(output_tracks)] = 0
+    
+    return sst_grid, output_tracks
+
+
 def bin_ssh(data_tracks, L_x, L_y, n, filtered = False):
     """
     Extract gridded SSH and raw tracks from xarray Dataset
@@ -127,12 +195,10 @@ def bin_ssh(data_tracks, L_x, L_y, n, filtered = False):
     lons_flat = lon_grid.flatten()
     values_flat = data_tracks.values.flatten()
 
-    # check if there is any non-nan value in ssh
-    if np.isnan(data_tracks.values.flatten()).all():
+    if np.isnan(values_flat).all():
         print("All SSH values are NaN, returning zero grid and empty tracks.")
-
+        return np.zeros((n, n, 1))  # also need an early return here or the binning will fail
      # Now bin with matching-length arrays
-     # TODO still 3542x4976 instead of 128x128
     input_grid, _, _, _ = stats.binned_statistic_2d(
         lons_flat, lats_flat, values_flat,
         statistic='mean',
@@ -178,14 +244,14 @@ sst_high_res = True # True = L4 MUR SST with MW+IR (highest spatial resolution b
 
 test_year = 2025
 
-n_regions = 5615
+n_regions = 5
 
 test_dates = []
-for t in range(365):
+for t in range(10):
     test_dates.append(datetime.date(2025,1,1)+datetime.timedelta(days=t))
 
-LAT_MIN, LAT_MAX = 0, 90
-LON_MIN, LON_MAX = 90, 180
+LAT_MIN, LAT_MAX = 0, 5
+LON_MIN, LON_MAX = 90, 95
     
 save_dir = './pre-processed/testing'
 
@@ -259,19 +325,16 @@ def save_batches(region):
             print("2", swot_tracks.dims)
         except KeyError:
             print(f"No SWOT data in {date_loop}")
-            swot_tracks = xr.Dataset(
-                coords={"lat": np.array([]), "lon": np.array([])},
-                data_vars={"ssha_filtered": (("lat", "lon"), np.empty((0, 0)))}
+            swot_tracks = xr.DataArray(
+                np.empty((0, 0)),
+                dims=["lat", "lon"],
+                coords={"lat": np.array([]), "lon": np.array([])}
             )
-            ssh_tracks = xr.Dataset(
-                coords={"lat": np.array([]), "lon": np.array([])},
-                data_vars={"sla_filtered": (("lat", "lon"), np.empty((0, 0)))}
+            ssh_tracks = xr.DataArray(
+                np.empty((0, 0)),
+                dims=["lat", "lon"],
+                coords={"lat": np.array([]), "lon": np.array([])}
             )
-        try:
-            sst_loop_hr = nc_datasets["l3_sst.nc"]["adjusted_sea_surface_temperature"]
-        except KeyError:
-            print(f"No SST data in {date_loop}")  
-            sst_loop_hr = np.zeros((n,n))  
 
         # cut the data to the region of interest (e.g. 960km x 960km box around center of region):
         lat_min = lat_center - L_y/2/111e3
@@ -279,6 +342,15 @@ def save_batches(region):
         lon_min = lon_center - L_x/2/111e3
         lon_max = lon_center + L_x/2/111e3
         
+
+        try:
+            sst_loop_hr = nc_datasets["l3_sst.nc"]["adjusted_sea_surface_temperature"]
+            sst_loop = sst_loop_hr.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
+            sst_grid, _ = bin_sst(sst_loop, L_x, L_y, n)
+        except KeyError:
+            print(f"No SST data in {date_loop}")  
+            sst_grid = np.zeros((n,n))
+
         print(f"Region {region} with center lat {lat_center} and lon {lon_center} has lat range {lat_min} to {lat_max} and lon range {lon_min} to {lon_max}")
 
         swot_tracks = swot_tracks.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
@@ -286,8 +358,8 @@ def save_batches(region):
             
         input_ssh = bin_ssh(swot_tracks,L_x,L_y, n, filtered)
     
-        input_data_final[t,:,:,0] = sst_loop_hr
-        input_data_final[t,:,:,1] = input_ssh
+        input_data_final[t,:,:,0] = sst_grid
+        input_data_final[t,:,:,1] = input_ssh[:,:,0]
         
 
     np.save(save_dir + f'/input_data_region{region}.npy', input_data_final)
@@ -315,7 +387,7 @@ def create_sublists(large_list, n):
 
 if __name__ == '__main__':
     tacoreader.use("pandas")
-    dataset = tacoreader.load("https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/main/")
+    dataset = tacoreader.load("https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/38b0254452aa57b26e2e96508196ae1b48e1e18a/")
     centers = [i for i in range(n_regions)]
     
     lock = multiprocessing.Lock()

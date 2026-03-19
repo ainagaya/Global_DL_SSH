@@ -76,14 +76,14 @@ class SSH_Dataset_data_challenge_ssh_only(Dataset):
         invar = torch.from_numpy(np.expand_dims(ssh, axis = 1).astype(np.float32))
         outvar = torch.from_numpy(np.zeros((400,3)).astype(np.float32))
         
-       	return invar, outvar
+        return invar, outvar
     
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Specify the GPU device
 pred_dir = './uninterpolated_preds/'
 weight_dir = './model_weights/'
 data_challenge_dir = './pre-processed/testing/'
 
-available_regions = [i for i in range(5615)]
+available_regions = [i for i in range(5)]
 
 n_cpus = 10
 n_t = 30
@@ -93,9 +93,9 @@ n = 128
 batch_size = 50 # DON'T CHANGE, THIS IS FIXED IN THE PRE-PROCESSING TO BE 1 BATCH PER FILE
 n_obs_max = 400 # max number of SSH observations on any day in loss function, allows to have fixed size inputs/outputs with zero padding making it easier to create TFRecord dataset
 n_train_samples = 1000000
-experiment_name = f'simvp_ssh_sst_ns1000000global_'
+experiment_name = f'simvp_ssh_sst_ns1000000_global_'
 weight_epoch = 48
-n_regions = 5615
+n_regions = 5
               
 lr = 0.001
 n_train_batches = int(n_train_samples/batch_size)
@@ -112,28 +112,31 @@ if "module." in list(state_dict.keys())[0]:
 model.load_state_dict(state_dict)
 model.eval()
 
-for region in range(5615):
+for region in range(5):
     dataset = SSH_Dataset_data_challenge(data_challenge_dir, region, n_t, mean_ssh, std_ssh, mean_sst, std_sst)
     data_loader = DataLoader(dataset, batch_size=batch_size,
-                        shuffle=False, num_workers=n_cpus)
-    i = 0
-    pred = np.zeros((365,128,128))
+                             shuffle=False, num_workers=n_cpus)
     
+    i = 0  # ← reset i inside the region loop
+    n_samples = len(dataset)
+    pred = np.zeros((n_samples, 128, 128))  # ← size from dataset, not hardcoded 50
     print(region)
     
     with torch.no_grad():
         for torch_input_batch, _ in data_loader:
-
             torch_input_batch = torch_input_batch.to(device)
-
             preds = model(torch_input_batch)
-            preds = preds.cpu().numpy()[:,15,0,:,:]
-            preds = preds*std_ssh+mean_ssh
-            pred[i:i+preds.shape[0],:,:] = preds
-            i+=preds.shape[0]
+            preds = preds.cpu().numpy()[:, 15, 0, :, :]
+            preds = preds * std_ssh + mean_ssh
+            print(f"Preds: {preds}")
+            print(f"Preds shape: {preds.shape}")
+            print(f"Preds shape 0: {preds.shape[0]}")
+            pred[i:i+preds.shape[0], :, :] = preds
+            i += preds.shape[0]
             print(i)
+    
     np.save(pred_dir + experiment_name + f'preds_region{region}.npy', pred)
-
+    
 # Clean up
 if os.path.exists(tmp_dir):
     if len(os.listdir(tmp_dir)) > 0:
@@ -147,8 +150,8 @@ input_directory = './uninterpolated_preds/'
 output_directory = './preds_refactored/'
 num_files = np.size(available_regions)
 output_shape = (num_files, 128, 128)
-start_date = datetime.date(2019,1,1)
-for day in range(365):
+start_date = datetime.date(2025,1,1)
+for day in range(5):
     print(f'Refactoring: day {day}')
     output_file = output_directory + experiment_name + f'_pred_{start_date + datetime.timedelta(days=day)}.npy'
 
