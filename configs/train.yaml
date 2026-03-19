@@ -1,0 +1,20 @@
+extends: ./configs/base.yaml
+
+train:
+  n_train_samples: 1000000
+  num_epochs: 50
+  learning_rate: 0.001
+  val_batches: 500
+  save_every: 1
+  experiment_name: simvp_ssh_sst_ns1000000_global_
+  model_kwargs:
+    in_shape: [30, 2, 128, 128]
+    model_type: gsta
+    hid_S: 8
+    hid_T: 128
+    drop: 0.2
+    drop_path: 0.15
+
+loss:
+  import_path: torch.nn:MSELoss
+  kwargs: {}

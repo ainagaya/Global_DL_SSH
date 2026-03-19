@@ -1,0 +1,45 @@
+project:
+  name: global-dl-ssh
+
+paths:
+  training_tfrecord_dir: ./pre-processed/training
+  validation_tfrecord_dir: ./pre-processed/validation
+  testing_dir: ./pre-processed/testing
+  weights_dir: ./model_weights
+  logs_dir: ./loss_logs
+  preds_dir: ./model_preds
+  refactored_preds_dir: ./preds_refactored
+  merged_output_dir: ./SimVP_SSH-SST_1M_grads
+  tmp_dir: ~/tmp
+
+normalization:
+  mean_ssh: 0.074
+  std_ssh: 0.0986
+  mean_sst: 293.307
+  std_sst: 8.726
+
+geometry:
+  grid_size: 128
+  domain_x_m: 960000.0
+  domain_y_m: 960000.0
+  dx_m: 7500.0
+  region_count: 5
+  lat_min: 0.0
+  lat_max: 5.0
+  lon_min: 90.0
+  lon_max: 95.0
+
+sequence:
+  n_t: 30
+  batch_size: 25
+  n_obs_max: 400
+
+runtime:
+  workers: 4
+  download_workers: 4
+  random_seed: 42
+  log_level: INFO
+
+legacy:
+  model_factory: src.simvp_model:SimVP_Model_no_skip_sst
+  merge_function: src.merging:merge_maps_and_save

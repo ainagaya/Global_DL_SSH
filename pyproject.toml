@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gdlssh-refactor"
+version = "0.1.0"
+description = "Configuration-driven refactor scaffold for Global_DL_SSH scripts"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "xarray",
+  "matplotlib",
+  "pyyaml",
+  "requests",
+  "torch",
+  "tensorflow",
+]
+
+[tool.setuptools]
+packages = ["gdlssh"]

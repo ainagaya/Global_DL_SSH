@@ -1,0 +1,20 @@
+extends: ./configs/base.yaml
+
+merge:
+  pred_file_pattern: simvp_ssh_sst_ns1000000_global__pred_
+  output_network_name: SimVP_SSH_SST_1M_global
+  available_regions: [0, 1, 2, 3, 4]
+  prediction_dates:
+    - 2025-01-01
+    - 2025-01-02
+    - 2025-01-03
+    - 2025-01-04
+    - 2025-01-05
+  mask_filename: ./land_water_mask_10grid.nc
+  dist_filename: ./distance_to_nearest_coastlines_10grid.nc
+  mdt_filename: ./mdt_hybrid_cnes_cls18_cmems2020_global.nc
+  L_m: 250000.0
+  crop_pixels: 9
+  with_grads: true
+  mask_coast_dist_km: 0
+  res_deg: 0.1

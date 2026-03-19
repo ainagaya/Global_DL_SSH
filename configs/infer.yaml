@@ -1,0 +1,9 @@
+extends: ./configs/base.yaml
+
+predict:
+  experiment_name: simvp_ssh_sst_ns1000000_global_
+  checkpoint_epoch: 48
+  batch_size: 50
+  num_days: 5
+  available_regions: [0, 1, 2, 3, 4]
+  prediction_time_index: 15
