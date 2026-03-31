@@ -51,6 +51,50 @@ class SimVP_Model_no_skip(nn.Module):
         Y = Y.reshape(B, T, C, H, W)
 
         return Y
+
+
+class SimVP_Model_no_skip_configurable(nn.Module):
+    """Configurable SimVP variant with independent input/output channel counts."""
+
+    def __init__(self, in_shape, out_channels=None, hid_S=16, hid_T=256, N_S=4, N_T=4,
+                 model_type='gSTA', mlp_ratio=8., drop=0.0, drop_path=0.0,
+                 spatio_kernel_enc=3, spatio_kernel_dec=3, act_inplace=True, **kwargs):
+        super(SimVP_Model_no_skip_configurable, self).__init__()
+        T, C_in, H, W = in_shape
+        C_out = C_in if out_channels is None else out_channels
+        H, W = int(H / 2**(N_S/2)), int(W / 2**(N_S/2))
+        act_inplace = False
+        self.enc = Encoder_no_skip(C_in, hid_S, N_S, spatio_kernel_enc, act_inplace=act_inplace)
+        self.dec = Decoder_no_skip(hid_S, C_out, N_S, spatio_kernel_dec, act_inplace=act_inplace)
+
+        model_type = 'gsta' if model_type is None else model_type.lower()
+        if model_type == 'incepu':
+            self.hid = MidIncepNet(T * hid_S, hid_T, N_T)
+        else:
+            self.hid = MidMetaNet(
+                T * hid_S,
+                hid_T,
+                N_T,
+                input_resolution=(H, W),
+                model_type=model_type,
+                mlp_ratio=mlp_ratio,
+                drop=drop,
+                drop_path=drop_path,
+            )
+
+    def forward(self, x_raw, **kwargs):
+        B, T, C, H, W = x_raw.shape
+        x = x_raw.view(B * T, C, H, W)
+
+        embed = self.enc(x)
+        _, C_embed, H_embed, W_embed = embed.shape
+
+        z = embed.view(B, T, C_embed, H_embed, W_embed)
+        hid = self.hid(z)
+        hid = hid.reshape(B * T, C_embed, H_embed, W_embed)
+
+        y = self.dec(hid)
+        return y.reshape(B, T, y.shape[1], H, W)
     
 class SimVP_Model_no_skip_sst(nn.Module):
     r"""SimVP Model

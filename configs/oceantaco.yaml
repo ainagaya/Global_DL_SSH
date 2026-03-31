@@ -1,0 +1,99 @@
+paths:
+  weights_dir: ./model_weights
+  logs_dir: ./loss_logs
+  predictions_dir: ./predictions
+  queries_dir: ./queries
+
+oceantaco:
+  taco_path: https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/main/
+
+regions:
+  global:
+    bbox: [-180.0, 180.0, -60.0, 60.0]
+  north_pacific_east:
+    bbox: [90.0, 95.0, -5.0, 5.0]
+
+queries:
+  patch_size:
+    value: 5.0
+    unit: deg
+  land_mask_path:
+  max_land_fraction: 0.5
+  max_spatial_overlap: 1.0
+  oversample_factor: 2.0
+  spatial_overlap: 0.25
+  temporal_stride_days: 1
+  verbose: false
+
+data:
+  sequence_length: 5
+  target_index: 2
+  temporal_agg: stack
+  grid:
+    height: 128
+    width: 128
+  inputs:
+    - key: l3_ssh
+      normalize:
+        mean: 0.074
+        std: 0.0986
+        mask_zeros: true
+    - key: l4_sst
+      normalize:
+        mean: 20.157
+        std: 8.726
+        min_valid: -5.0
+        mask_zeros: true
+  targets:
+    - key: l3_swot
+      normalize:
+        mean: 0.074
+        std: 0.0986
+        mask_zeros: true
+
+splits:
+  train:
+    strategy: training
+    start_date: 2023-05-01
+    end_date: 2023-05-15
+    n_queries: 256
+    regions:
+      - north_pacific_east
+  validation:
+    strategy: evaluation
+    start_date: 2023-06-01
+    end_date: 2023-06-15
+    spatial_overlap: 0.25
+    temporal_stride_days: 1
+    regions:
+      - north_pacific_east
+  test:
+    strategy: evaluation
+    start_date: 2023-07-01
+    end_date: 2023-07-15
+    spatial_overlap: 0.25
+    temporal_stride_days: 1
+    regions: global
+
+model:
+  type: gsta
+  hidden_spatial: 8
+  hidden_temporal: 128
+  spatial_depth: 4
+  temporal_depth: 4
+  drop: 0.2
+  drop_path: 0.15
+
+training:
+  batch_size: 4
+  num_workers: 0
+  learning_rate: 0.001
+  epochs: 10
+  amp: true
+  shuffle: true
+  seed: 42
+  checkpoint_name: simvp_oceantaco
+
+prediction:
+  split: test
+  batch_size: 1

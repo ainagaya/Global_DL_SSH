@@ -62,3 +62,16 @@ def torch_tracked_mse_interp(y_pred, y_true):
         losses[i] = loss_loop
     
     return torch.mean(losses)
+
+
+def torch_masked_mse(y_pred, y_true, mask_zeros=True):
+    if mask_zeros:
+        mask = y_true != 0
+    else:
+        mask = torch.isfinite(y_true)
+
+    if not torch.any(mask):
+        return torch.zeros((), device=y_pred.device, dtype=y_pred.dtype)
+
+    diff = y_pred[mask] - y_true[mask]
+    return torch.mean(diff ** 2)
