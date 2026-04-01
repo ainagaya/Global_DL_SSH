@@ -36,6 +36,8 @@ RUN pip install --no-cache-dir \
     black \
     isort \
     flake8 \
+    pytest \
+    pytest-cov \
     PyYAML \
     scipy \
     requests \

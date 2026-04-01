@@ -194,6 +194,17 @@ def _prepare_variable_tensor(
     elif output.ndim != 4:
         raise ValueError(f"Unsupported tensor shape for variable '{source_cfg['key']}': {tuple(output.shape)}")
 
+    current_length = int(output.shape[1])
+    if current_length < sequence_length:
+        if current_length == 0:
+            output = torch.zeros((batch_size, sequence_length, height, width), dtype=torch.float32)
+        else:
+            pad_source = output[:, -1:, :, :]
+            pad = pad_source.repeat(1, sequence_length - current_length, 1, 1)
+            output = torch.cat([output, pad], dim=1)
+    elif current_length > sequence_length:
+        output = output[:, :sequence_length, :, :]
+
     return _normalise_tensor(output, source_cfg)
 
 

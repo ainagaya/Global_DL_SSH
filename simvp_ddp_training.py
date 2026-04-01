@@ -9,7 +9,6 @@ import numpy as np
 sys.path.append("src")
 
 import torch
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 from src.config_utils import ensure_dir, load_config
@@ -83,7 +82,7 @@ def evaluate(model, dataloader, device, use_amp, config):
             inputs, targets = batch_to_model_tensors(batch, config)
             inputs = inputs.to(device)
             targets = targets.to(device)
-            with autocast(enabled=use_amp):
+            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 predictions = model(inputs)
                 loss = torch_masked_mse(predictions, targets)
             total_loss += float(loss.item())
@@ -129,7 +128,7 @@ def main():
     use_amp = bool(training_cfg["amp"]) and device.type == "cuda"
     model = build_model(config).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=float(training_cfg["learning_rate"]))
-    scaler = GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
     checkpoint_name = training_cfg["checkpoint_name"]
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
@@ -155,7 +154,7 @@ def main():
             targets = targets.to(device)
 
             optimizer.zero_grad(set_to_none=True)
-            with autocast(enabled=use_amp):
+            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 predictions = model(inputs)
                 loss = torch_masked_mse(predictions, targets)
 
