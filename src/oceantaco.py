@@ -302,7 +302,7 @@ def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any]):
     input_map = batch["inputs"]
     first_input = next((tensor for tensor in input_map.values() if tensor is not None), None)
     if first_input is None:
-        raise RuntimeError("Received a batch without any input tensors.")
+        return None, None
     batch_size = int(first_input.shape[0])
 
     input_tensors = [

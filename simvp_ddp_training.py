@@ -77,9 +77,13 @@ def evaluate(model, dataloader, device, use_amp, config):
     model.eval()
     total_loss = 0.0
     steps = 0
+    skipped_batches = 0
     with torch.no_grad():
         for batch in dataloader:
             inputs, targets = batch_to_model_tensors(batch, config)
+            if inputs is None:
+                skipped_batches += 1
+                continue
             inputs = inputs.to(device)
             targets = targets.to(device)
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
@@ -87,7 +91,7 @@ def evaluate(model, dataloader, device, use_amp, config):
                 loss = torch_masked_mse(predictions, targets)
             total_loss += float(loss.item())
             steps += 1
-    return total_loss / max(steps, 1)
+    return total_loss / max(steps, 1), skipped_batches
 
 
 def main():
@@ -147,9 +151,13 @@ def main():
         model.train()
         total_train_loss = 0.0
         steps = 0
+        skipped_train_batches = 0
 
         for batch in train_loader:
             inputs, targets = batch_to_model_tensors(batch, config)
+            if inputs is None:
+                skipped_train_batches += 1
+                continue
             inputs = inputs.to(device)
             targets = targets.to(device)
 
@@ -166,7 +174,7 @@ def main():
             steps += 1
 
         train_loss = total_train_loss / max(steps, 1)
-        val_loss = evaluate(model, val_loader, device, use_amp, config)
+        val_loss, skipped_val_batches = evaluate(model, val_loader, device, use_amp, config)
         logger.log(epoch, train_loss, val_loss)
 
         checkpoint = {
@@ -179,7 +187,10 @@ def main():
             "config_path": config["__config_path__"],
         }
         torch.save(checkpoint, weights_dir / f"{checkpoint_name}_epoch{epoch}.pt")
-        print(f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_loss:.6f}")
+        print(
+            f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
+            f"skipped_train_batches={skipped_train_batches} skipped_val_batches={skipped_val_batches}"
+        )
 
 
 if __name__ == "__main__":

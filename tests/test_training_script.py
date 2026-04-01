@@ -31,10 +31,33 @@ def test_evaluate_runs_with_cpu_autocast_disabled(base_config):
         "metadata": {"bboxes": [], "time_ranges": []},
     }
 
-    loss = training_script.evaluate(DummyModel(), [batch], torch.device("cpu"), False, base_config)
+    loss, skipped = training_script.evaluate(DummyModel(), [batch], torch.device("cpu"), False, base_config)
 
     assert isinstance(loss, float)
     assert loss >= 0.0
+    assert skipped == 0
+
+
+def test_evaluate_skips_empty_input_batches(base_config):
+    class DummyModel(torch.nn.Module):
+        def forward(self, x):
+            return x
+
+    empty_batch = {
+        "inputs": {
+            "l3_ssh": None,
+            "l4_sst": None,
+        },
+        "targets": {
+            "l3_swot": torch.ones(1, 128, 128),
+        },
+        "metadata": {"bboxes": [], "time_ranges": []},
+    }
+
+    loss, skipped = training_script.evaluate(DummyModel(), [empty_batch], torch.device("cpu"), False, base_config)
+
+    assert loss == 0.0
+    assert skipped == 1
 
 
 def test_masked_mse_zero_target_batch_keeps_grad():
