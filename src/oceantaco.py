@@ -17,12 +17,96 @@ def _import_oceantaco():
         from ocean_taco.dataset import OceanTACODataset, collate_ocean_samples
         from ocean_taco.dataset.queries import PatchSize, QueryGenerator
         from ocean_taco.dataset.retrieve import HF_DEFAULT_URL
+        from ocean_taco.dataset import dataset as ocean_dataset_module
     except ImportError as exc:
         raise ImportError(
             "ocean-taco is required for this workflow. Install it with `pip install ocean-taco`."
         ) from exc
 
-    return OceanTACODataset, collate_ocean_samples, PatchSize, QueryGenerator, HF_DEFAULT_URL
+    return OceanTACODataset, collate_ocean_samples, PatchSize, QueryGenerator, HF_DEFAULT_URL, ocean_dataset_module
+
+
+def _is_mergeable_grid(data) -> bool:
+    return getattr(data, "ndim", 0) >= 2 and all(dim > 0 for dim in data.shape[-2:])
+
+
+def _build_patched_dataset_class(base_cls, ocean_dataset_module):
+    class PatchedOceanTACODataset(base_cls):
+        """Compatibility wrapper around OceanTACO's dataset loader.
+
+        OceanTACO can occasionally return 1D fragments for sources that are usually
+        gridded, which makes the upstream GridMerger crash when it assumes HxW data.
+        We skip those malformed fragments and keep the valid 2D tiles.
+        """
+
+        def _load_variable(self, var, file_df, bbox):
+            if var.startswith("glorys_"):
+                var_df = file_df[file_df["data_source"] == "glorys"]
+            else:
+                var_df = file_df[file_df["data_source"] == var]
+
+            if var_df.empty:
+                return None
+
+            nc_var = ocean_dataset_module.VAR_NAMES[var]
+            resolution = float(var_df["res_deg_lat"].iloc[0])
+
+            use_merger = len(var_df) > 1
+            merger = ocean_dataset_module.GridMerger(bbox, resolution) if use_merger else None
+            data_list = []
+            lats_out, lons_out = None, None
+
+            for _, row in var_df.iterrows():
+                vsi_path = row[ocean_dataset_module.COL_VSI]
+                result = ocean_dataset_module.load_netcdf_var(vsi_path, nc_var, bbox)
+                if not result:
+                    continue
+                data, lats, lons = result
+
+                if getattr(data, "size", 0) == 0:
+                    continue
+
+                if merger and _is_mergeable_grid(data):
+                    merger.add(data, lons, lats)
+                elif _is_mergeable_grid(data):
+                    data_list.append(data)
+                    if lats_out is None:
+                        lats_out, lons_out = lats, lons
+
+            if merger and getattr(merger, "count", None) is not None and merger.count.sum() > 0:
+                data, lats_out, lons_out = merger.result()
+            elif data_list:
+                data = self._aggregate_temporal(data_list)
+            else:
+                return None
+
+            if var == "l4_sst":
+                data = data - 273.15
+
+            if var not in ocean_dataset_module.POINT_SOURCES and self.default_patch_size is not None:
+                target_size = self.patch_sizes.get(var, self.default_patch_size)
+                if data.shape[-2:] != target_size:
+                    data = ocean_dataset_module._interpolate_to_patch(data, target_size)
+                lon_min, lon_max, lat_min, lat_max = bbox
+                h, w = target_size
+                lats_out = ocean_dataset_module.np.linspace(lat_min, lat_max, h, dtype=ocean_dataset_module.np.float32)
+                lons_out = ocean_dataset_module.np.linspace(lon_min, lon_max, w, dtype=ocean_dataset_module.np.float32)
+
+            data = ocean_dataset_module.np.nan_to_num(data, nan=0.0)
+            if data.ndim > 2 and data.shape[0] == 1:
+                data = data.squeeze(0)
+
+            return {
+                "data": ocean_dataset_module.torch.from_numpy(data.astype(ocean_dataset_module.np.float32)),
+                "lats": ocean_dataset_module.torch.from_numpy(lats_out.astype(ocean_dataset_module.np.float32))
+                if lats_out is not None
+                else None,
+                "lons": ocean_dataset_module.torch.from_numpy(lons_out.astype(ocean_dataset_module.np.float32))
+                if lons_out is not None
+                else None,
+            }
+
+    return PatchedOceanTACODataset
 
 
 def _resolve_bbox(region_spec: Any, config: Dict[str, Any]) -> tuple[float, float, float, float]:
@@ -61,7 +145,7 @@ def _build_patch_size(config: Dict[str, Any], PatchSize):
 
 
 def build_queries(config: Dict[str, Any], split_name: str):
-    _, _, PatchSize, QueryGenerator, _ = _import_oceantaco()
+    _, _, PatchSize, QueryGenerator, _, _ = _import_oceantaco()
     split_cfg = get_split_config(config, split_name)
     query_cfg = config["queries"]
 
@@ -115,7 +199,7 @@ def build_queries(config: Dict[str, Any], split_name: str):
 
     queries_dir = config["paths"].get("queries_dir")
     if queries_dir:
-        _, _, _, QueryGenerator, _ = _import_oceantaco()
+        _, _, _, QueryGenerator, _, _ = _import_oceantaco()
         query_path = ensure_dir(queries_dir, config) / split_name
         QueryGenerator.save_queries(
             queries,
@@ -131,13 +215,14 @@ def build_queries(config: Dict[str, Any], split_name: str):
 
 
 def build_dataset(config: Dict[str, Any], split_name: str):
-    OceanTACODataset, _, _, _, HF_DEFAULT_URL = _import_oceantaco()
+    OceanTACODataset, _, _, _, HF_DEFAULT_URL, ocean_dataset_module = _import_oceantaco()
     data_cfg = config["data"]
     grid_cfg = data_cfg["grid"]
 
     taco_path = config["oceantaco"].get("taco_path", HF_DEFAULT_URL)
     queries = build_queries(config, split_name)
-    return OceanTACODataset(
+    dataset_cls = _build_patched_dataset_class(OceanTACODataset, ocean_dataset_module)
+    return dataset_cls(
         taco_path=taco_path,
         queries=queries,
         input_variables=[source_cfg["key"] for source_cfg in data_cfg["inputs"]],
@@ -149,7 +234,7 @@ def build_dataset(config: Dict[str, Any], split_name: str):
 
 
 def get_collate_fn():
-    _, collate_ocean_samples, _, _, _ = _import_oceantaco()
+    _, collate_ocean_samples, _, _, _, _ = _import_oceantaco()
     return collate_ocean_samples
 
 

@@ -108,6 +108,8 @@ def test_build_queries_uses_oceantaco_query_generator(base_config, monkeypatch):
     fake_dataset_module = types.ModuleType("ocean_taco.dataset")
     fake_dataset_module.OceanTACODataset = object
     fake_dataset_module.collate_ocean_samples = lambda batch: batch
+    fake_dataset_impl_module = types.ModuleType("ocean_taco.dataset.dataset")
+    fake_dataset_module.dataset = fake_dataset_impl_module
 
     fake_queries_module = types.ModuleType("ocean_taco.dataset.queries")
     fake_queries_module.PatchSize = FakePatchSize
@@ -120,6 +122,7 @@ def test_build_queries_uses_oceantaco_query_generator(base_config, monkeypatch):
 
     monkeypatch.setitem(sys.modules, "ocean_taco", fake_root_module)
     monkeypatch.setitem(sys.modules, "ocean_taco.dataset", fake_dataset_module)
+    monkeypatch.setitem(sys.modules, "ocean_taco.dataset.dataset", fake_dataset_impl_module)
     monkeypatch.setitem(sys.modules, "ocean_taco.dataset.queries", fake_queries_module)
     monkeypatch.setitem(sys.modules, "ocean_taco.dataset.retrieve", fake_retrieve_module)
 
