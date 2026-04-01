@@ -35,3 +35,16 @@ def test_evaluate_runs_with_cpu_autocast_disabled(base_config):
 
     assert isinstance(loss, float)
     assert loss >= 0.0
+
+
+def test_masked_mse_zero_target_batch_keeps_grad():
+    prediction = torch.randn(1, 5, 1, 16, 16, requires_grad=True)
+    target = torch.zeros(1, 5, 1, 16, 16)
+
+    from src.pytorch_losses import torch_masked_mse
+
+    loss = torch_masked_mse(prediction, target)
+    loss.backward()
+
+    assert loss.item() == 0.0
+    assert prediction.grad is not None

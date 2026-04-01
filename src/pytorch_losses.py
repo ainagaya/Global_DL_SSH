@@ -71,7 +71,7 @@ def torch_masked_mse(y_pred, y_true, mask_zeros=True):
         mask = torch.isfinite(y_true)
 
     if not torch.any(mask):
-        return torch.zeros((), device=y_pred.device, dtype=y_pred.dtype)
+        return y_pred.sum() * 0.0
 
     diff = y_pred[mask] - y_true[mask]
     return torch.mean(diff ** 2)
