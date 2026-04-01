@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir \
     cartopy \
     h5netcdf \
     netCDF4 \
-    "ocean-taco[hf]"
+    "ocean_taco[hf] @ git+https://github.com/nilsleh/oceanTACO.git@main"
 
 ENV workdir=/home/user
 WORKDIR ${workdir}
