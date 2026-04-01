@@ -1,5 +1,6 @@
 import argparse
 import csv
+import logging
 import random
 import sys
 from pathlib import Path
@@ -12,10 +13,13 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config_utils import ensure_dir, load_config
+from src.logging_utils import configure_logging
 from src.mlflow_utils import MLflowTracker
 from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn
 from src.pytorch_losses import torch_masked_mse
 from src.simvp_model import SimVP_Model_no_skip_configurable
+
+LOGGER = logging.getLogger(__name__)
 
 
 class LossLogger:
@@ -98,13 +102,16 @@ def evaluate(model, dataloader, device, use_amp, config):
 def main():
     args = parse_args()
     config = load_config(args.config)
+    configure_logging(config)
     training_cfg = config["training"]
     tracker = MLflowTracker(config, stage="training")
 
     set_seed(int(training_cfg["seed"]))
+    LOGGER.info("Loaded training config from %s", config["__config_path__"])
 
     weights_dir = ensure_dir(config["paths"]["weights_dir"], config)
     logs_dir = ensure_dir(config["paths"]["logs_dir"], config)
+    LOGGER.info("Artifacts will be written to weights_dir=%s logs_dir=%s", weights_dir, logs_dir)
     tracker.start_run(run_name=training_cfg.get("checkpoint_name"))
     try:
         tracker.log_config()
@@ -117,6 +124,7 @@ def main():
             raise RuntimeError("No OceanTACO training samples matched the current configuration.")
         if len(val_dataset) == 0:
             raise RuntimeError("No OceanTACO validation samples matched the current configuration.")
+        LOGGER.info("Loaded datasets: train=%s samples validation=%s samples", len(train_dataset), len(val_dataset))
         tracker.log_metrics(
             {
                 "train_dataset_size": float(len(train_dataset)),
@@ -143,6 +151,7 @@ def main():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         use_amp = bool(training_cfg["amp"]) and device.type == "cuda"
         model = build_model(config).to(device)
+        LOGGER.info("Using device=%s amp=%s", device, use_amp)
         optimizer = torch.optim.Adam(model.parameters(), lr=float(training_cfg["learning_rate"]))
         scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
@@ -157,13 +166,16 @@ def main():
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
             start_epoch = int(checkpoint["epoch"]) + 1
+            LOGGER.info("Resumed checkpoint from %s at epoch=%s", checkpoint_path, start_epoch)
 
         epochs = int(training_cfg["epochs"])
+        LOGGER.info("Starting training for %s epochs", epochs - start_epoch)
         for epoch in range(start_epoch, epochs):
             model.train()
             total_train_loss = 0.0
             steps = 0
             skipped_train_batches = 0
+            LOGGER.info("Epoch %s/%s started", epoch + 1, epochs)
 
             for batch in train_loader:
                 inputs, targets = batch_to_model_tensors(batch, config)
@@ -212,16 +224,24 @@ def main():
             torch.save(checkpoint, checkpoint_path)
             if config.get("tracking", {}).get("mlflow", {}).get("log_checkpoints", True):
                 tracker.log_artifact(checkpoint_path, artifact_subdir="checkpoints")
-            print(
-                f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
-                f"skipped_train_batches={skipped_train_batches} skipped_val_batches={skipped_val_batches}"
+            LOGGER.info(
+                "Epoch %s/%s finished: train_loss=%.6f val_loss=%.6f skipped_train_batches=%s skipped_val_batches=%s checkpoint=%s",
+                epoch + 1,
+                epochs,
+                train_loss,
+                val_loss,
+                skipped_train_batches,
+                skipped_val_batches,
+                checkpoint_path,
             )
     finally:
         checkpoint_name = training_cfg["checkpoint_name"]
         loss_log_path = logs_dir / f"{checkpoint_name}_losses.csv"
         if loss_log_path.exists() and config.get("tracking", {}).get("mlflow", {}).get("log_loss_csv", True):
             tracker.log_artifact(loss_log_path, artifact_subdir="logs")
+            LOGGER.info("Saved loss log to %s", loss_log_path)
         tracker.end_run()
+        LOGGER.info("Training run finished")
 
 
 if __name__ == "__main__":

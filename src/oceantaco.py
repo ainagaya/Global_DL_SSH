@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -10,6 +11,7 @@ from src.config_utils import ensure_dir, get_split_config
 
 
 DEFAULT_GLOBAL_BBOX = (-180.0, 180.0, -60.0, 60.0)
+LOGGER = logging.getLogger(__name__)
 
 
 def _import_oceantaco():
@@ -157,6 +159,14 @@ def build_queries(config: Dict[str, Any], split_name: str):
     date_range = (str(split_cfg["start_date"]), str(split_cfg["end_date"]))
     time_window_days = int(split_cfg.get("time_window_days", config["data"]["sequence_length"]))
     bboxes = _split_region_bboxes(split_cfg, config)
+    LOGGER.info(
+        "Building %s queries with strategy=%s, date_range=%s..%s, regions=%s",
+        split_name,
+        split_cfg["strategy"],
+        split_cfg["start_date"],
+        split_cfg["end_date"],
+        bboxes,
+    )
 
     queries = []
     if split_cfg["strategy"] == "training":
@@ -213,6 +223,9 @@ def build_queries(config: Dict[str, Any], split_name: str):
                 "regions": split_cfg.get("regions", "global"),
             },
         )
+        LOGGER.info("Saved %s queries for split=%s to %s", len(queries), split_name, query_path)
+
+    LOGGER.info("Built %s queries for split=%s", len(queries), split_name)
 
     return queries
 
@@ -224,8 +237,17 @@ def build_dataset(config: Dict[str, Any], split_name: str):
 
     taco_path = config["oceantaco"].get("taco_path", HF_DEFAULT_URL)
     queries = build_queries(config, split_name)
+    LOGGER.info(
+        "Creating OceanTACO dataset for split=%s with %s queries, %s inputs, %s targets, grid=%sx%s",
+        split_name,
+        len(queries),
+        len(data_cfg["inputs"]),
+        len(data_cfg["targets"]),
+        int(grid_cfg["height"]),
+        int(grid_cfg["width"]),
+    )
     dataset_cls = _build_patched_dataset_class(OceanTACODataset, ocean_dataset_module)
-    return dataset_cls(
+    dataset = dataset_cls(
         taco_path=taco_path,
         queries=queries,
         input_variables=[source_cfg["key"] for source_cfg in data_cfg["inputs"]],
@@ -234,6 +256,8 @@ def build_dataset(config: Dict[str, Any], split_name: str):
         temporal_agg=data_cfg.get("temporal_agg", "stack"),
         default_patch_size=(int(grid_cfg["height"]), int(grid_cfg["width"])),
     )
+    LOGGER.info("Dataset ready for split=%s with %s samples", split_name, len(dataset))
+    return dataset
 
 
 def get_collate_fn():

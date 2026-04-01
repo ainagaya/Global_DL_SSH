@@ -26,6 +26,8 @@ tracking:
 
 When enabled, training logs the flattened config, dataset sizes, epoch losses, skipped-batch counts, the CSV loss log, and checkpoints. Prediction logs the config, checkpoint artifact, split metadata, and saved prediction counts. Prediction `.npz` artifacts are optional and controlled by `tracking.mlflow.log_prediction_artifacts`.
 
+Runtime console logging is configured under `logging.level` in the YAML. The default is `INFO`. Set it to `DEBUG` for more verbose progress output or `WARNING` to reduce noise.
+
 Run training with:
 
 ```bash

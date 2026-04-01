@@ -4,6 +4,9 @@ paths:
   predictions_dir: ./predictions
   queries_dir: ./queries
 
+logging:
+  level: INFO
+
 tracking:
   mlflow:
     enabled: false

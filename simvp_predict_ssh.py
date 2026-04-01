@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -9,9 +10,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config_utils import ensure_dir, load_config
+from src.logging_utils import configure_logging
 from src.mlflow_utils import MLflowTracker
 from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn, prediction_records
 from src.simvp_model import SimVP_Model_no_skip_configurable
+
+LOGGER = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -57,9 +61,11 @@ def build_model(config):
 def main():
     args = parse_args()
     config = load_config(args.config)
+    configure_logging(config)
     prediction_cfg = config["prediction"]
     split_name = args.split or prediction_cfg["split"]
     tracker = MLflowTracker(config, stage="prediction")
+    LOGGER.info("Loaded prediction config from %s", config["__config_path__"])
 
     tracker.start_run(
         run_name=prediction_cfg.get("run_name"),
@@ -69,6 +75,7 @@ def main():
         dataset = build_dataset(config, split_name)
         if len(dataset) == 0:
             raise RuntimeError(f"No OceanTACO samples matched split '{split_name}'.")
+        LOGGER.info("Loaded prediction dataset for split=%s with %s samples", split_name, len(dataset))
 
         dataloader = DataLoader(
             dataset,
@@ -80,6 +87,8 @@ def main():
 
         output_dir = ensure_dir(config["paths"]["predictions_dir"], config)
         checkpoint = torch.load(Path(args.checkpoint), map_location="cpu")
+        LOGGER.info("Writing predictions to %s", output_dir)
+        LOGGER.info("Loaded checkpoint from %s", args.checkpoint)
         tracker.log_config()
         tracker.log_metrics({"prediction_dataset_size": float(len(dataset))}, step=0)
         tracker.log_artifact(args.checkpoint, artifact_subdir="checkpoints")
@@ -88,6 +97,7 @@ def main():
         model = build_model(config).to(device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
+        LOGGER.info("Using device=%s for inference", device)
 
         saved_files = 0
         skipped_batches = 0
@@ -96,6 +106,7 @@ def main():
                 inputs, targets = batch_to_model_tensors(batch, config)
                 if inputs is None:
                     skipped_batches += 1
+                    LOGGER.warning("Skipping empty prediction batch %s/%s", batch_index + 1, len(dataloader))
                     continue
                 records = prediction_records(batch, config)
                 inputs = inputs.to(device)
@@ -122,7 +133,12 @@ def main():
                     saved_files += 1
                     if config.get("tracking", {}).get("mlflow", {}).get("log_prediction_artifacts", False):
                         tracker.log_artifact(save_path, artifact_subdir="predictions")
-                print(f"saved batch {batch_index + 1}/{len(dataloader)}")
+                LOGGER.info(
+                    "Saved prediction batch %s/%s with %s samples",
+                    batch_index + 1,
+                    len(dataloader),
+                    batch_size,
+                )
     finally:
         if "saved_files" in locals():
             tracker.log_metrics(
@@ -131,6 +147,11 @@ def main():
                     "skipped_prediction_batches": float(skipped_batches),
                 },
                 step=0,
+            )
+            LOGGER.info(
+                "Prediction run finished with saved_prediction_files=%s skipped_prediction_batches=%s",
+                saved_files,
+                skipped_batches,
             )
         tracker.end_run()
 
