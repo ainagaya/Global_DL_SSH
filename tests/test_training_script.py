@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 import simvp_ddp_training as training_script
+from src.mlflow_utils import MLflowTracker
 
 
 def test_build_model_produces_expected_output_shape(base_config):
@@ -71,3 +72,13 @@ def test_masked_mse_zero_target_batch_keeps_grad():
 
     assert loss.item() == 0.0
     assert prediction.grad is not None
+
+
+def test_mlflow_tracker_can_be_disabled(base_config):
+    base_config["tracking"]["mlflow"]["enabled"] = False
+
+    tracker = MLflowTracker(base_config, stage="training")
+    tracker.start_run(run_name="test")
+    tracker.log_config()
+    tracker.log_metrics({"train_loss": 1.0}, step=0)
+    tracker.end_run()

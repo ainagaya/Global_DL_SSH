@@ -1,5 +1,8 @@
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
+*.pyc.*
 *$py.class
 
 .pytest_cache/
@@ -11,6 +14,7 @@ queries/
 model_weights/
 loss_logs/
 predictions/
+mlruns/
 
 *.pt
 *.pth

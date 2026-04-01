@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir \
     pandas \
     matplotlib \
     numpy \
+    mlflow \
     wandb \
     lightning \
     scikit-learn \

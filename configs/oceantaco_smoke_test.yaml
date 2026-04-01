@@ -23,28 +23,28 @@ oceantaco:
 regions:
   global:
     bbox: [-180.0, 180.0, -60.0, 60.0]
-  north_pacific_east:
-    bbox: [90.0, 95.0, -5.0, 5.0]
+  smoke_test:
+    bbox: [90.0, 91.0, -1.0, 1.0]
 
 queries:
   patch_size:
-    value: 5.0
+    value: 1.0
     unit: deg
   land_mask_path:
-  max_land_fraction: 0.5
+  max_land_fraction: 0.8
   max_spatial_overlap: 1.0
-  oversample_factor: 2.0
-  spatial_overlap: 0.25
+  oversample_factor: 1.0
+  spatial_overlap: 0.0
   temporal_stride_days: 1
   verbose: false
 
 data:
-  sequence_length: 5
-  target_index: 2
+  sequence_length: 2
+  target_index: 0
   temporal_agg: stack
   grid:
-    height: 128
-    width: 128
+    height: 32
+    width: 32
   inputs:
     - key: l3_ssh
       normalize:
@@ -68,44 +68,45 @@ splits:
   train:
     strategy: training
     start_date: 2023-05-01
-    end_date: 2023-05-15
-    n_queries: 256
+    end_date: 2023-05-02
+    n_queries: 4
     regions:
-      - north_pacific_east
+      - smoke_test
   validation:
     strategy: evaluation
-    start_date: 2023-06-01
-    end_date: 2023-06-15
-    spatial_overlap: 0.25
+    start_date: 2023-05-01
+    end_date: 2023-05-02
+    spatial_overlap: 0.0
     temporal_stride_days: 1
     regions:
-      - north_pacific_east
+      - smoke_test
   test:
     strategy: evaluation
-    start_date: 2023-07-01
-    end_date: 2023-07-15
-    spatial_overlap: 0.25
+    start_date: 2023-05-01
+    end_date: 2023-05-02
+    spatial_overlap: 0.0
     temporal_stride_days: 1
-    regions: global
+    regions:
+      - smoke_test
 
 model:
   type: gsta
-  hidden_spatial: 8
-  hidden_temporal: 128
-  spatial_depth: 4
-  temporal_depth: 4
-  drop: 0.2
-  drop_path: 0.15
+  hidden_spatial: 4
+  hidden_temporal: 32
+  spatial_depth: 2
+  temporal_depth: 2
+  drop: 0.0
+  drop_path: 0.0
 
 training:
-  batch_size: 4
+  batch_size: 1
   num_workers: 0
   learning_rate: 0.001
-  epochs: 10
-  amp: true
-  shuffle: true
+  epochs: 1
+  amp: false
+  shuffle: false
   seed: 42
-  checkpoint_name: simvp_oceantaco
+  checkpoint_name: simvp_oceantaco_smoke
 
 prediction:
   split: test

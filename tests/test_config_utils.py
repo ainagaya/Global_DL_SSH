@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.config_utils import ensure_dir, get_split_config, load_config, resolve_path
+from src.mlflow_utils import flatten_config
 
 
 def test_load_config_adds_internal_paths():
@@ -35,3 +36,13 @@ def test_get_split_config_returns_named_split(base_config):
 
     assert split["strategy"] == "training"
     assert split["n_queries"] == 256
+
+
+def test_flatten_config_omits_internal_keys(base_config):
+    flat = flatten_config(base_config)
+
+    assert "__config_path__" not in flat
+    assert "__repo_root__" not in flat
+    assert flat["training.batch_size"] == "4"
+    assert '"key": "l3_ssh"' in flat["data.inputs"]
+    assert '"key": "l4_sst"' in flat["data.inputs"]

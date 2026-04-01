@@ -12,6 +12,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config_utils import ensure_dir, load_config
+from src.mlflow_utils import MLflowTracker
 from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn
 from src.pytorch_losses import torch_masked_mse
 from src.simvp_model import SimVP_Model_no_skip_configurable
@@ -98,99 +99,129 @@ def main():
     args = parse_args()
     config = load_config(args.config)
     training_cfg = config["training"]
+    tracker = MLflowTracker(config, stage="training")
 
     set_seed(int(training_cfg["seed"]))
 
     weights_dir = ensure_dir(config["paths"]["weights_dir"], config)
     logs_dir = ensure_dir(config["paths"]["logs_dir"], config)
+    tracker.start_run(run_name=training_cfg.get("checkpoint_name"))
+    try:
+        tracker.log_config()
 
-    train_dataset = build_dataset(config, "train")
-    val_dataset = build_dataset(config, "validation")
-    collate_fn = get_collate_fn()
+        train_dataset = build_dataset(config, "train")
+        val_dataset = build_dataset(config, "validation")
+        collate_fn = get_collate_fn()
 
-    if len(train_dataset) == 0:
-        raise RuntimeError("No OceanTACO training samples matched the current configuration.")
-    if len(val_dataset) == 0:
-        raise RuntimeError("No OceanTACO validation samples matched the current configuration.")
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=int(training_cfg["batch_size"]),
-        shuffle=bool(training_cfg["shuffle"]),
-        num_workers=int(training_cfg["num_workers"]),
-        collate_fn=collate_fn,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=int(training_cfg["batch_size"]),
-        shuffle=False,
-        num_workers=int(training_cfg["num_workers"]),
-        collate_fn=collate_fn,
-    )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_amp = bool(training_cfg["amp"]) and device.type == "cuda"
-    model = build_model(config).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=float(training_cfg["learning_rate"]))
-    scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
-
-    checkpoint_name = training_cfg["checkpoint_name"]
-    checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
-    logger = LossLogger(logs_dir / f"{checkpoint_name}_losses.csv")
-    start_epoch = 0
-
-    if checkpoint_path is not None:
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scaler.load_state_dict(checkpoint["scaler_state_dict"])
-        start_epoch = int(checkpoint["epoch"]) + 1
-
-    epochs = int(training_cfg["epochs"])
-    for epoch in range(start_epoch, epochs):
-        model.train()
-        total_train_loss = 0.0
-        steps = 0
-        skipped_train_batches = 0
-
-        for batch in train_loader:
-            inputs, targets = batch_to_model_tensors(batch, config)
-            if inputs is None:
-                skipped_train_batches += 1
-                continue
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-                predictions = model(inputs)
-                loss = torch_masked_mse(predictions, targets)
-
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            total_train_loss += float(loss.item())
-            steps += 1
-
-        train_loss = total_train_loss / max(steps, 1)
-        val_loss, skipped_val_batches = evaluate(model, val_loader, device, use_amp, config)
-        logger.log(epoch, train_loss, val_loss)
-
-        checkpoint = {
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scaler_state_dict": scaler.state_dict(),
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "config_path": config["__config_path__"],
-        }
-        torch.save(checkpoint, weights_dir / f"{checkpoint_name}_epoch{epoch}.pt")
-        print(
-            f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
-            f"skipped_train_batches={skipped_train_batches} skipped_val_batches={skipped_val_batches}"
+        if len(train_dataset) == 0:
+            raise RuntimeError("No OceanTACO training samples matched the current configuration.")
+        if len(val_dataset) == 0:
+            raise RuntimeError("No OceanTACO validation samples matched the current configuration.")
+        tracker.log_metrics(
+            {
+                "train_dataset_size": float(len(train_dataset)),
+                "validation_dataset_size": float(len(val_dataset)),
+            },
+            step=0,
         )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=int(training_cfg["batch_size"]),
+            shuffle=bool(training_cfg["shuffle"]),
+            num_workers=int(training_cfg["num_workers"]),
+            collate_fn=collate_fn,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=int(training_cfg["batch_size"]),
+            shuffle=False,
+            num_workers=int(training_cfg["num_workers"]),
+            collate_fn=collate_fn,
+        )
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        use_amp = bool(training_cfg["amp"]) and device.type == "cuda"
+        model = build_model(config).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=float(training_cfg["learning_rate"]))
+        scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
+
+        checkpoint_name = training_cfg["checkpoint_name"]
+        checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+        logger = LossLogger(logs_dir / f"{checkpoint_name}_losses.csv")
+        start_epoch = 0
+
+        if checkpoint_path is not None:
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint["model_state_dict"])
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            scaler.load_state_dict(checkpoint["scaler_state_dict"])
+            start_epoch = int(checkpoint["epoch"]) + 1
+
+        epochs = int(training_cfg["epochs"])
+        for epoch in range(start_epoch, epochs):
+            model.train()
+            total_train_loss = 0.0
+            steps = 0
+            skipped_train_batches = 0
+
+            for batch in train_loader:
+                inputs, targets = batch_to_model_tensors(batch, config)
+                if inputs is None:
+                    skipped_train_batches += 1
+                    continue
+                inputs = inputs.to(device)
+                targets = targets.to(device)
+
+                optimizer.zero_grad(set_to_none=True)
+                with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+                    predictions = model(inputs)
+                    loss = torch_masked_mse(predictions, targets)
+
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+
+                total_train_loss += float(loss.item())
+                steps += 1
+
+            train_loss = total_train_loss / max(steps, 1)
+            val_loss, skipped_val_batches = evaluate(model, val_loader, device, use_amp, config)
+            logger.log(epoch, train_loss, val_loss)
+            tracker.log_metrics(
+                {
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "skipped_train_batches": float(skipped_train_batches),
+                    "skipped_val_batches": float(skipped_val_batches),
+                    "completed_train_batches": float(steps),
+                },
+                step=epoch,
+            )
+
+            checkpoint = {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scaler_state_dict": scaler.state_dict(),
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "config_path": config["__config_path__"],
+            }
+            checkpoint_path = weights_dir / f"{checkpoint_name}_epoch{epoch}.pt"
+            torch.save(checkpoint, checkpoint_path)
+            if config.get("tracking", {}).get("mlflow", {}).get("log_checkpoints", True):
+                tracker.log_artifact(checkpoint_path, artifact_subdir="checkpoints")
+            print(
+                f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
+                f"skipped_train_batches={skipped_train_batches} skipped_val_batches={skipped_val_batches}"
+            )
+    finally:
+        checkpoint_name = training_cfg["checkpoint_name"]
+        loss_log_path = logs_dir / f"{checkpoint_name}_losses.csv"
+        if loss_log_path.exists() and config.get("tracking", {}).get("mlflow", {}).get("log_loss_csv", True):
+            tracker.log_artifact(loss_log_path, artifact_subdir="logs")
+        tracker.end_run()
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config_utils import ensure_dir, load_config
+from src.mlflow_utils import MLflowTracker
 from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn, prediction_records
 from src.simvp_model import SimVP_Model_no_skip_configurable
 
@@ -58,53 +59,80 @@ def main():
     config = load_config(args.config)
     prediction_cfg = config["prediction"]
     split_name = args.split or prediction_cfg["split"]
+    tracker = MLflowTracker(config, stage="prediction")
 
-    dataset = build_dataset(config, split_name)
-    if len(dataset) == 0:
-        raise RuntimeError(f"No OceanTACO samples matched split '{split_name}'.")
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=int(prediction_cfg["batch_size"]),
-        shuffle=False,
-        num_workers=int(config["training"]["num_workers"]),
-        collate_fn=get_collate_fn(),
+    tracker.start_run(
+        run_name=prediction_cfg.get("run_name"),
+        extra_tags={"split": split_name, "checkpoint": str(Path(args.checkpoint).name)},
     )
+    try:
+        dataset = build_dataset(config, split_name)
+        if len(dataset) == 0:
+            raise RuntimeError(f"No OceanTACO samples matched split '{split_name}'.")
 
-    output_dir = ensure_dir(config["paths"]["predictions_dir"], config)
-    checkpoint = torch.load(Path(args.checkpoint), map_location="cpu")
+        dataloader = DataLoader(
+            dataset,
+            batch_size=int(prediction_cfg["batch_size"]),
+            shuffle=False,
+            num_workers=int(config["training"]["num_workers"]),
+            collate_fn=get_collate_fn(),
+        )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model(config).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
+        output_dir = ensure_dir(config["paths"]["predictions_dir"], config)
+        checkpoint = torch.load(Path(args.checkpoint), map_location="cpu")
+        tracker.log_config()
+        tracker.log_metrics({"prediction_dataset_size": float(len(dataset))}, step=0)
+        tracker.log_artifact(args.checkpoint, artifact_subdir="checkpoints")
 
-    with torch.no_grad():
-        for batch_index, batch in enumerate(dataloader):
-            inputs, targets = batch_to_model_tensors(batch, config)
-            records = prediction_records(batch, config)
-            inputs = inputs.to(device)
-            predictions = model(inputs).cpu().numpy()
-            targets = targets.numpy()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = build_model(config).to(device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
 
-            batch_size = predictions.shape[0]
-            for sample_index in range(batch_size):
-                record = records[sample_index]
-                lon_min, lon_max, lat_min, lat_max = record["bbox"]
-                target_date = record["target_date"]
-                save_path = output_dir / (
-                    f"{split_name}_{target_date}_"
-                    f"lon{lon_min:.2f}_{lon_max:.2f}_lat{lat_min:.2f}_{lat_max:.2f}.npz"
-                )
-                np.savez_compressed(
-                    save_path,
-                    prediction=predictions[sample_index],
-                    target=targets[sample_index],
-                    bbox=np.array(record["bbox"], dtype=np.float32),
-                    time_range=np.array(record["time_range"]),
-                    target_date=target_date,
-                )
-            print(f"saved batch {batch_index + 1}/{len(dataloader)}")
+        saved_files = 0
+        skipped_batches = 0
+        with torch.no_grad():
+            for batch_index, batch in enumerate(dataloader):
+                inputs, targets = batch_to_model_tensors(batch, config)
+                if inputs is None:
+                    skipped_batches += 1
+                    continue
+                records = prediction_records(batch, config)
+                inputs = inputs.to(device)
+                predictions = model(inputs).cpu().numpy()
+                targets = targets.numpy()
+
+                batch_size = predictions.shape[0]
+                for sample_index in range(batch_size):
+                    record = records[sample_index]
+                    lon_min, lon_max, lat_min, lat_max = record["bbox"]
+                    target_date = record["target_date"]
+                    save_path = output_dir / (
+                        f"{split_name}_{target_date}_"
+                        f"lon{lon_min:.2f}_{lon_max:.2f}_lat{lat_min:.2f}_{lat_max:.2f}.npz"
+                    )
+                    np.savez_compressed(
+                        save_path,
+                        prediction=predictions[sample_index],
+                        target=targets[sample_index],
+                        bbox=np.array(record["bbox"], dtype=np.float32),
+                        time_range=np.array(record["time_range"]),
+                        target_date=target_date,
+                    )
+                    saved_files += 1
+                    if config.get("tracking", {}).get("mlflow", {}).get("log_prediction_artifacts", False):
+                        tracker.log_artifact(save_path, artifact_subdir="predictions")
+                print(f"saved batch {batch_index + 1}/{len(dataloader)}")
+    finally:
+        if "saved_files" in locals():
+            tracker.log_metrics(
+                {
+                    "saved_prediction_files": float(saved_files),
+                    "skipped_prediction_batches": float(skipped_batches),
+                },
+                step=0,
+            )
+        tracker.end_run()
 
 
 if __name__ == "__main__":
