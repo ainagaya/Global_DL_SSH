@@ -67,7 +67,10 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
                     continue
 
                 if merger and _is_mergeable_grid(data):
-                    merger.add(data, lons, lats)
+                    try:
+                        merger.add(data, lons, lats)
+                    except (IndexError, ValueError):
+                        continue
                 elif _is_mergeable_grid(data):
                     data_list.append(data)
                     if lats_out is None:
