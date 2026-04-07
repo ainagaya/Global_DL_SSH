@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from src.config_utils import ensure_dir, get_split_config, load_config, resolve_path
@@ -46,3 +47,19 @@ def test_flatten_config_omits_internal_keys(base_config):
     assert flat["training.batch_size"] == "4"
     assert '"key": "l3_ssh"' in flat["data.inputs"]
     assert '"key": "l4_sst"' in flat["data.inputs"]
+
+
+def test_flatten_config_stringifies_yaml_dates():
+    config = {
+        "splits": {
+            "train": {
+                "start_date": date(2025, 1, 15),
+                "end_date": date(2025, 3, 15),
+            }
+        }
+    }
+
+    flat = flatten_config(config)
+
+    assert flat["splits.train.start_date"] == "2025-01-15"
+    assert flat["splits.train.end_date"] == "2025-03-15"

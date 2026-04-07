@@ -1,18 +1,29 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict
 
 from src.config_utils import resolve_path
 
 
+def _json_default(value: Any) -> str:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
 def _stringify_param(value: Any) -> str:
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
     if isinstance(value, (str, int, float, bool)) or value is None:
         return str(value)
-    return json.dumps(value, sort_keys=True)
+    return json.dumps(value, sort_keys=True, default=_json_default)
 
 
 def flatten_config(config: Dict[str, Any], prefix: str = "") -> Dict[str, str]:
