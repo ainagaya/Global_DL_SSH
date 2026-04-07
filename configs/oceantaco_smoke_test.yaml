@@ -70,23 +70,23 @@ data:
 splits:
   train:
     strategy: training
-    start_date: 2023-05-01
-    end_date: 2023-05-07
+    start_date: 2025-05-01
+    end_date: 2025-05-07
     n_queries: 12
     regions:
       - smoke_test
   validation:
     strategy: evaluation
-    start_date: 2023-05-08
-    end_date: 2023-05-10
+    start_date: 2025-05-08
+    end_date: 2025-05-10
     spatial_overlap: 0.25
     temporal_stride_days: 1
     regions:
       - smoke_test
   test:
     strategy: evaluation
-    start_date: 2023-05-11
-    end_date: 2023-05-13
+    start_date: 2025-05-11
+    end_date: 2025-05-25
     spatial_overlap: 0.25
     temporal_stride_days: 1
     regions:
