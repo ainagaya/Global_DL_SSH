@@ -320,7 +320,7 @@ def _prepare_variable_tensor(
     return _normalise_tensor(output, source_cfg)
 
 
-def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any]):
+def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any], allow_empty_inputs: bool = False):
     grid_cfg = config["data"]["grid"]
     sequence_length = int(config["data"]["sequence_length"])
     height = int(grid_cfg["height"])
@@ -328,9 +328,19 @@ def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any]):
 
     input_map = batch["inputs"]
     first_input = next((tensor for tensor in input_map.values() if tensor is not None), None)
-    if first_input is None:
+    first_target = next((tensor for tensor in batch["targets"].values() if tensor is not None), None)
+    batch_size = None
+    if first_input is not None:
+        batch_size = int(first_input.shape[0])
+    elif first_target is not None:
+        batch_size = int(first_target.shape[0])
+    elif batch.get("metadata", {}).get("bboxes"):
+        batch_size = len(batch["metadata"]["bboxes"])
+
+    if batch_size is None:
         return None, None
-    batch_size = int(first_input.shape[0])
+    if first_input is None and not allow_empty_inputs:
+        return None, None
 
     input_tensors = [
         _prepare_variable_tensor(input_map.get(source_cfg["key"]), batch_size, sequence_length, height, width, source_cfg)

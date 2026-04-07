@@ -101,13 +101,24 @@ def main():
 
         saved_files = 0
         skipped_batches = 0
+        zero_input_batches = 0
+        allow_empty_inputs = bool(prediction_cfg.get("allow_empty_inputs", True))
+        print(f"BATCH: ", batch)
         with torch.no_grad():
             for batch_index, batch in enumerate(dataloader):
-                inputs, targets = batch_to_model_tensors(batch, config)
+                has_any_inputs = any(tensor is not None for tensor in batch["inputs"].values())
+                inputs, targets = batch_to_model_tensors(batch, config, allow_empty_inputs=allow_empty_inputs)
                 if inputs is None:
                     skipped_batches += 1
                     LOGGER.warning("Skipping empty prediction batch %s/%s", batch_index + 1, len(dataloader))
                     continue
+                if not has_any_inputs:
+                    zero_input_batches += 1
+                    LOGGER.warning(
+                        "Prediction batch %s/%s has no observed inputs. Using zero-filled tensors instead.",
+                        batch_index + 1,
+                        len(dataloader),
+                    )
                 records = prediction_records(batch, config)
                 inputs = inputs.to(device)
                 predictions = model(inputs).cpu().numpy()
@@ -145,13 +156,15 @@ def main():
                 {
                     "saved_prediction_files": float(saved_files),
                     "skipped_prediction_batches": float(skipped_batches),
+                    "zero_input_prediction_batches": float(zero_input_batches),
                 },
                 step=0,
             )
             LOGGER.info(
-                "Prediction run finished with saved_prediction_files=%s skipped_prediction_batches=%s",
+                "Prediction run finished with saved_prediction_files=%s skipped_prediction_batches=%s zero_input_prediction_batches=%s",
                 saved_files,
                 skipped_batches,
+                zero_input_batches,
             )
         tracker.end_run()
 

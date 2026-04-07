@@ -67,6 +67,25 @@ def test_batch_to_model_tensors_trims_long_time_dimension(base_config):
     assert targets.shape[1] == 5
 
 
+def test_batch_to_model_tensors_can_zero_fill_empty_inputs_for_prediction(base_config):
+    batch = {
+        "inputs": {
+            "l3_ssh": None,
+            "l4_sst": None,
+        },
+        "targets": {
+            "l3_swot": torch.ones(1, 5, 128, 128),
+        },
+        "metadata": {"bboxes": [(90.0, 95.0, -5.0, 5.0)], "time_ranges": [("2023-05-01", "2023-05-05")]},
+    }
+
+    inputs, targets = batch_to_model_tensors(batch, base_config, allow_empty_inputs=True)
+
+    assert inputs.shape == (1, 5, 2, 128, 128)
+    assert torch.count_nonzero(inputs) == 0
+    assert targets.shape == (1, 5, 1, 128, 128)
+
+
 def test_prediction_records_uses_target_index(base_config):
     batch = {
         "metadata": {
