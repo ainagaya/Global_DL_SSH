@@ -3,32 +3,40 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+import numpy as np
 import pandas as pd
 
 
-# This script is intentionally verbose and heavily commented because its main
-# purpose is debugging. When query-driven dataset creation returns empty data,
-# we first want to answer:
+# This script is intentionally comment-heavy because it is meant to support
+# debugging sessions where we are trying to understand *why* OceanTACO-based
+# datasets look empty. There are two different debugging levels:
 #
-# 1. Were query files actually written?
-# 2. How many queries do they contain?
-# 3. What bbox and time ranges do they cover?
-# 4. Are the bboxes malformed or overly large / tiny?
-# 5. Are there duplicates or suspiciously identical queries?
-# 6. Do different files / splits cover what we expect?
+# 1. Query metadata inspection
+#    This answers questions like:
+#    - Were queries written at all?
+#    - Which bbox/date ranges do they cover?
+#    - Are they duplicated or malformed?
 #
-# The script is format-tolerant on purpose. OceanTACO query exports may be JSON,
-# JSONL, CSV, Parquet, or directory-based structures depending on version and
-# local tooling. Rather than assuming one exact schema, we inspect common
-# patterns and summarize what we can.
+# 2. Data inspection
+#    This goes one step further and actually loads samples for stored queries
+#    using the OceanTACO dataset API, then checks each configured variable for:
+#    - `None`
+#    - all-NaN / no finite values
+#    - all-zero values
+#
+# That second mode is especially useful here because "empty dataset" problems
+# often turn out to mean:
+# - files exist, but a variable resolves to `None`
+# - values are technically present, but every value is NaN
+# - upstream loaders convert NaNs to zeros, so everything looks blank
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Inspect saved query files and summarize their coverage.")
+    parser = argparse.ArgumentParser(description="Inspect saved query files and optionally validate their loaded data.")
     parser.add_argument(
         "query_dir",
         nargs="?",
@@ -41,12 +49,29 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="How many sample records to print per file.",
     )
+    parser.add_argument(
+        "--config",
+        default="configs/oceantaco.yaml",
+        help="YAML config used to determine OceanTACO path, variables, and grid size when --check-data is enabled.",
+    )
+    parser.add_argument(
+        "--check-data",
+        action="store_true",
+        help="Load stored queries back through OceanTACO and inspect whether variables are None / all-NaN / all-zero.",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=25,
+        help="Maximum number of loaded query samples to inspect per query file when --check-data is enabled.",
+    )
     return parser.parse_args()
 
 
 def iter_query_files(root: Path) -> list[Path]:
-    # We scan recursively because queries may be saved as one file per split,
-    # one file per batch, or a directory tree created by a library helper.
+    # We scan recursively because OceanTACO may save one file per split or may
+    # create a directory tree. This also lets us point the script at a top-level
+    # `queries/` directory without caring about the exact layout.
     file_paths: list[Path] = []
     for path in sorted(root.rglob("*")):
         if path.is_file() and path.suffix.lower() in {".json", ".jsonl", ".csv", ".parquet"}:
@@ -55,18 +80,14 @@ def iter_query_files(root: Path) -> list[Path]:
 
 
 def read_records(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    # We normalize everything into a list[dict]. Metadata is returned separately
-    # so we can report split names or export-time information if present.
+    # This is the pure metadata reader used even when OceanTACO is not
+    # installed. It makes the script useful in lightweight environments too.
     suffix = path.suffix.lower()
     metadata: dict[str, Any] = {}
 
     if suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            # Common cases:
-            # - {"queries": [...], "metadata": {...}}
-            # - {"metadata": {...}, "items": [...]}
-            # - a single query dict
             if isinstance(payload.get("metadata"), dict):
                 metadata = payload["metadata"]
             if isinstance(payload.get("queries"), list):
@@ -99,16 +120,12 @@ def read_records(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
 
 def as_record(item: Any) -> dict[str, Any]:
-    # Query objects should normally serialize as dictionaries. If something else
-    # slips through, we still wrap it so the caller gets a stable shape.
     if isinstance(item, dict):
         return item
     return {"value": item}
 
 
 def flatten_keys(record: dict[str, Any], prefix: str = "") -> Iterable[str]:
-    # Key-frequency summaries are useful when we do not know the exact export
-    # schema in advance.
     for key, value in record.items():
         full_key = f"{prefix}.{key}" if prefix else str(key)
         yield full_key
@@ -117,15 +134,7 @@ def flatten_keys(record: dict[str, Any], prefix: str = "") -> Iterable[str]:
 
 
 def extract_bbox(record: dict[str, Any]) -> tuple[float, float, float, float] | None:
-    # We support several common patterns:
-    # - {"bbox": [lon_min, lon_max, lat_min, lat_max]}
-    # - {"bbox_constraint": [...]}
-    # - {"lon_min": ..., "lon_max": ..., "lat_min": ..., "lat_max": ...}
-    # - nested dicts with those names
-    candidates = [
-        record.get("bbox"),
-        record.get("bbox_constraint"),
-    ]
+    candidates = [record.get("bbox"), record.get("bbox_constraint")]
 
     for candidate in candidates:
         if isinstance(candidate, (list, tuple)) and len(candidate) == 4:
@@ -156,12 +165,7 @@ def extract_bbox(record: dict[str, Any]) -> tuple[float, float, float, float] | 
 
 
 def extract_date_range(record: dict[str, Any]) -> tuple[str, str] | None:
-    # Again, several schema variants are accepted because debugging data
-    # pipelines is easier when the tool is forgiving.
-    candidates = [
-        record.get("time_range"),
-        record.get("date_range"),
-    ]
+    candidates = [record.get("time_range"), record.get("date_range")]
     for candidate in candidates:
         if isinstance(candidate, (list, tuple)) and len(candidate) == 2:
             return str(candidate[0]), str(candidate[1])
@@ -277,7 +281,6 @@ def print_file_report(path: Path, records: list[dict[str, Any]], metadata: dict[
             f" unique_ranges={date_extent['unique_ranges']}"
         )
 
-    # Show the most common keys to help understand the query schema quickly.
     key_counts: Counter[str] = summary["key_counts"]
     if key_counts:
         print("top_keys:")
@@ -287,6 +290,175 @@ def print_file_report(path: Path, records: list[dict[str, Any]], metadata: dict[
     print("sample_records:")
     for record in records[:limit]:
         print(f"  - {short_json(record, max_length=240)}")
+
+
+def import_runtime_helpers():
+    # The data-inspection mode depends on the local project config helpers and
+    # the OceanTACO-backed dataset builder. We import lazily so plain metadata
+    # inspection still works even when the ML dependencies are not available.
+    from src.config_utils import load_config
+    from src.oceantaco import _build_patched_dataset_class, _import_oceantaco
+
+    return load_config, _build_patched_dataset_class, _import_oceantaco
+
+
+def describe_variable_payload(value: Any) -> dict[str, Any]:
+    # This is the key debugging routine for "empty" data. It turns a loaded
+    # variable payload into flags we can count and report.
+    if value is None:
+        return {
+            "is_none": True,
+            "all_nan": False,
+            "all_non_finite": False,
+            "all_zero": False,
+            "shape": None,
+        }
+
+    # OceanTACO variables usually arrive as dictionaries with a `data` tensor,
+    # but we still handle raw arrays / tensors defensively.
+    if isinstance(value, dict):
+        payload = value.get("data")
+    else:
+        payload = value
+
+    if payload is None:
+        return {
+            "is_none": True,
+            "all_nan": False,
+            "all_non_finite": False,
+            "all_zero": False,
+            "shape": None,
+        }
+
+    if hasattr(payload, "detach"):
+        array = payload.detach().cpu().numpy()
+    else:
+        array = np.asarray(payload)
+
+    # Empty arrays are suspicious and effectively equivalent to "no data".
+    if array.size == 0:
+        return {
+            "is_none": False,
+            "all_nan": False,
+            "all_non_finite": True,
+            "all_zero": True,
+            "shape": tuple(array.shape),
+        }
+
+    finite_mask = np.isfinite(array)
+    all_non_finite = not bool(np.any(finite_mask))
+    all_nan = bool(np.isnan(array).all()) if np.issubdtype(array.dtype, np.floating) else False
+
+    # Important note: in our patched OceanTACO pipeline, NaNs are converted to
+    # zero before tensors are returned. That means "all_zero" is a useful
+    # secondary flag for suspiciously empty fields even when `all_nan` is false.
+    all_zero = bool(np.all(array == 0))
+
+    return {
+        "is_none": False,
+        "all_nan": all_nan,
+        "all_non_finite": all_non_finite,
+        "all_zero": all_zero,
+        "shape": tuple(int(dim) for dim in array.shape),
+    }
+
+
+def inspect_query_file_data(path: Path, config_path: str | Path, max_samples: int) -> None:
+    load_config, build_patched_dataset_class, import_oceantaco = import_runtime_helpers()
+    config = load_config(config_path)
+    OceanTACODataset, _, _, QueryGenerator, HF_DEFAULT_URL, ocean_dataset_module = import_oceantaco()
+
+    # We load the actual stored queries from disk using OceanTACO's own query
+    # loader. This is much safer than trying to reconstruct Query objects from
+    # raw JSON by hand.
+    queries, metadata = QueryGenerator.load_queries(path)
+    if not queries:
+        print("data_check: no queries could be loaded for this file")
+        return
+
+    data_cfg = config["data"]
+    grid_cfg = data_cfg["grid"]
+    taco_path = config["oceantaco"].get("taco_path", HF_DEFAULT_URL)
+    dataset_cls = build_patched_dataset_class(OceanTACODataset, ocean_dataset_module)
+    dataset = dataset_cls(
+        taco_path=taco_path,
+        queries=queries,
+        input_variables=[source_cfg["key"] for source_cfg in data_cfg["inputs"]],
+        target_variables=[source_cfg["key"] for source_cfg in data_cfg["targets"]],
+        target_resolution=data_cfg.get("target_resolution"),
+        temporal_agg=data_cfg.get("temporal_agg", "stack"),
+        default_patch_size=(int(grid_cfg["height"]), int(grid_cfg["width"])),
+    )
+
+    print(
+        "data_check:"
+        f" loaded_queries={len(queries)}"
+        f" metadata={short_json(metadata) if metadata else '{}'}"
+        f" inspected_samples={min(len(dataset), max_samples)}"
+    )
+
+    variable_stats: dict[str, Counter[str]] = defaultdict(Counter)
+    sample_flags: list[str] = []
+
+    for sample_index in range(min(len(dataset), max_samples)):
+        try:
+            sample = dataset[sample_index]
+        except Exception as exc:
+            sample_flags.append(f"sample[{sample_index}] failed_to_load={exc}")
+            continue
+
+        # We inspect both inputs and targets because either side may be empty.
+        for group_name in ("inputs", "targets"):
+            group = sample.get(group_name, {})
+            for variable_name, value in group.items():
+                description = describe_variable_payload(value)
+                stats = variable_stats[f"{group_name}.{variable_name}"]
+                stats["samples_seen"] += 1
+
+                if description["is_none"]:
+                    stats["none_count"] += 1
+                if description["all_nan"]:
+                    stats["all_nan_count"] += 1
+                if description["all_non_finite"]:
+                    stats["all_non_finite_count"] += 1
+                if description["all_zero"]:
+                    stats["all_zero_count"] += 1
+
+                if (
+                    description["is_none"]
+                    or description["all_nan"]
+                    or description["all_non_finite"]
+                    or description["all_zero"]
+                ):
+                    sample_flags.append(
+                        f"sample[{sample_index}] {group_name}.{variable_name}"
+                        f" none={description['is_none']}"
+                        f" all_nan={description['all_nan']}"
+                        f" all_non_finite={description['all_non_finite']}"
+                        f" all_zero={description['all_zero']}"
+                        f" shape={description['shape']}"
+                    )
+
+    print("variable_data_flags:")
+    for variable_name in sorted(variable_stats):
+        stats = variable_stats[variable_name]
+        print(
+            f"  - {variable_name}:"
+            f" samples_seen={stats['samples_seen']}"
+            f" none={stats['none_count']}"
+            f" all_nan={stats['all_nan_count']}"
+            f" all_non_finite={stats['all_non_finite_count']}"
+            f" all_zero={stats['all_zero_count']}"
+        )
+
+    if sample_flags:
+        print("flagged_samples:")
+        for line in sample_flags[:50]:
+            print(f"  - {line}")
+        if len(sample_flags) > 50:
+            print(f"  - ... and {len(sample_flags) - 50} more flagged sample entries")
+    else:
+        print("flagged_samples: none")
 
 
 def main() -> None:
@@ -317,6 +489,12 @@ def main() -> None:
 
         total_records += len(records)
         print_file_report(path, records, metadata, args.limit)
+
+        if args.check_data:
+            try:
+                inspect_query_file_data(path, config_path=args.config, max_samples=args.max_samples)
+            except Exception as exc:
+                print(f"data_check_failed: {exc}")
 
     print(f"\nTotal query records across all readable files: {total_records}")
 

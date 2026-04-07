@@ -266,6 +266,12 @@ Implementation:
   - invalid bbox counts
   - duplicate record signatures
   - sample records
+- It can also optionally reload stored queries through OceanTACO and inspect
+  actual sample variables for:
+  - `None`
+  - all-NaN
+  - all-non-finite
+  - all-zero values
 
 Design choice:
 
@@ -482,6 +488,7 @@ What it reports:
 - duplicate record counts
 - common keys across records
 - sample records
+- optional variable-level data flags when `--check-data` is used
 
 Why it matters:
 
@@ -492,6 +499,8 @@ Why it matters:
   - bboxes are malformed
   - all queries are duplicates
   - schema differs from expectation
+  - specific input/target variables load as `None`
+  - specific variables are entirely NaN / non-finite / zero after loading
 
 
 ### `plot_predictions.py`
