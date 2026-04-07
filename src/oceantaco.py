@@ -36,12 +36,26 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
     class PatchedOceanTACODataset(base_cls):
         """Compatibility wrapper around OceanTACO's dataset loader.
 
-        OceanTACO can occasionally return 1D fragments for sources that are usually
-        gridded, which makes the upstream GridMerger crash when it assumes HxW data.
-        We skip those malformed fragments and keep the valid 2D tiles.
+        OceanTACO's upstream `_load_variable()` should be preferred when it
+        succeeds because it knows the intended handling for the dataset.
+
+        We only fall back to the defensive implementation below when upstream
+        crashes on malformed fragments during merging. This preserves normal
+        loading behavior while still protecting training/inference from the
+        `IndexError: tuple index out of range` issue we saw earlier.
         """
 
         def _load_variable(self, var, file_df, bbox):
+            try:
+                return super()._load_variable(var, file_df, bbox)
+            except (IndexError, ValueError) as exc:
+                LOGGER.warning(
+                    "Falling back to defensive _load_variable for var=%s bbox=%s due to %s",
+                    var,
+                    bbox,
+                    exc,
+                )
+
             if var.startswith("glorys_"):
                 var_df = file_df[file_df["data_source"] == "glorys"]
             else:

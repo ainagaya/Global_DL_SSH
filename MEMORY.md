@@ -950,6 +950,11 @@ Smoke test:
   `.../resolve/main/` URL for `taco_path` was not the right kind of dataset root
   for OceanTACO’s `tacoreader.load(...)`. The adapter was updated to fall back
   to OceanTACO’s `HF_DEFAULT_URL` when it detects that raw URL pattern.
+- Another later debugging finding was that the first patched `_load_variable()`
+  implementation was too aggressive and could discard real data by skipping
+  non-2D fragments before OceanTACO had a chance to handle them. The adapter was
+  changed to try OceanTACO’s original `_load_variable()` first and only use the
+  defensive fallback if upstream raises `IndexError` or `ValueError`.
 
 
 ## Documentation changes made
