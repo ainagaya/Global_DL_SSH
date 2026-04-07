@@ -86,7 +86,7 @@ class MLflowTracker:
         if self._tracking_cfg.get("log_params", True):
             self._mlflow.log_params(flatten_config(self.config))
         if self._tracking_cfg.get("log_config_artifact", True):
-            self.log_artifact(self.config["__config_path__"], artifact_path="config")
+            self.log_artifact(self.config["__config_path__"], artifact_subdir="config")
 
     def log_metrics(self, metrics: Dict[str, float], step: int | None = None) -> None:
         if not self.enabled:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 import torch
 
 import simvp_ddp_training as training_script
@@ -82,3 +85,42 @@ def test_mlflow_tracker_can_be_disabled(base_config):
     tracker.log_config()
     tracker.log_metrics({"train_loss": 1.0}, step=0)
     tracker.end_run()
+
+
+def test_mlflow_tracker_logs_config_artifact(monkeypatch, base_config):
+    class FakeMLflow:
+        def __init__(self):
+            self.logged_artifacts = []
+
+        def set_tracking_uri(self, uri):
+            self.tracking_uri = uri
+
+        def set_experiment(self, name):
+            self.experiment_name = name
+
+        def start_run(self, run_name=None, tags=None):
+            self.run_name = run_name
+            self.tags = tags
+            return object()
+
+        def log_params(self, params):
+            self.params = params
+
+        def log_artifact(self, local_path, artifact_path=None):
+            self.logged_artifacts.append((local_path, artifact_path))
+
+        def end_run(self):
+            self.ended = True
+
+    fake_module = types.SimpleNamespace(mlflow=FakeMLflow())
+    monkeypatch.setitem(sys.modules, "mlflow", fake_module.mlflow)
+
+    base_config["tracking"]["mlflow"]["enabled"] = True
+    tracker = MLflowTracker(base_config, stage="training")
+    tracker.start_run(run_name="test")
+    tracker.log_config()
+
+    assert tracker._mlflow.logged_artifacts
+    logged_path, logged_subdir = tracker._mlflow.logged_artifacts[0]
+    assert logged_path == str(base_config["__config_path__"])
+    assert logged_subdir == "config"
