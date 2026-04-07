@@ -12,7 +12,7 @@ The new default path uses the installable `ocean-taco` package and lets you choo
 
 The main configuration lives in [`configs/oceantaco.yaml`](configs/oceantaco.yaml).
 
-For a quick pipeline sanity check, use [`configs/oceantaco_smoke_test.yaml`](configs/oceantaco_smoke_test.yaml). It uses a tiny bbox, short date range, small grid, shallow model, batch size `1`, and `1` epoch so training and prediction finish much faster.
+For a quick pipeline sanity check, use [`configs/oceantaco_smoke_test.yaml`](configs/oceantaco_smoke_test.yaml). It is still lightweight, but it now uses the same broad North Pacific region as the main config, a slightly longer date window, a few more queries, and a `64x64` grid so you are more likely to get preliminary but meaningful outputs while keeping runtime short.
 
 MLflow tracking is configured in the same YAML under `tracking.mlflow`. By default it is disabled. To enable local tracking, set:
 

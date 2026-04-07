@@ -210,10 +210,10 @@ Why:
 
 Smoke-test characteristics:
 
-- tiny bbox
-- short date range
-- very small query count
-- `32x32` grid
+- North Pacific regional bbox matching the main config
+- short but nontrivial date ranges
+- low but nontrivial query count
+- `64x64` grid
 - smaller model
 - batch size `1`
 - `1` epoch
@@ -613,11 +613,11 @@ Fast validation config.
 
 Characteristics:
 
-- tiny bbox
-- small patch size
-- short date range
-- low query count
-- smaller grid
+- North Pacific regional bbox matching the main config
+- moderate patch size for quicker but still meaningful coverage
+- short split windows with a little more temporal coverage
+- low but nontrivial query count
+- `64x64` grid
 - lighter model
 - `epochs: 1`
 - `amp: false`

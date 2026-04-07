@@ -27,27 +27,27 @@ regions:
   global:
     bbox: [-180.0, 180.0, -60.0, 60.0]
   smoke_test:
-    bbox: [90.0, 91.0, -1.0, 1.0]
+    bbox: [90.0, 95.0, -5.0, 5.0]
 
 queries:
   patch_size:
-    value: 1.0
+    value: 2.5
     unit: deg
   land_mask_path:
-  max_land_fraction: 0.8
+  max_land_fraction: 0.6
   max_spatial_overlap: 1.0
-  oversample_factor: 1.0
-  spatial_overlap: 0.0
+  oversample_factor: 2.0
+  spatial_overlap: 0.25
   temporal_stride_days: 1
   verbose: false
 
 data:
-  sequence_length: 2
-  target_index: 0
+  sequence_length: 3
+  target_index: 1
   temporal_agg: stack
   grid:
-    height: 32
-    width: 32
+    height: 64
+    width: 64
   inputs:
     - key: l3_ssh
       normalize:
@@ -71,23 +71,23 @@ splits:
   train:
     strategy: training
     start_date: 2023-05-01
-    end_date: 2023-05-02
-    n_queries: 4
+    end_date: 2023-05-07
+    n_queries: 12
     regions:
       - smoke_test
   validation:
     strategy: evaluation
-    start_date: 2023-05-01
-    end_date: 2023-05-02
-    spatial_overlap: 0.0
+    start_date: 2023-05-08
+    end_date: 2023-05-10
+    spatial_overlap: 0.25
     temporal_stride_days: 1
     regions:
       - smoke_test
   test:
     strategy: evaluation
-    start_date: 2023-05-01
-    end_date: 2023-05-02
-    spatial_overlap: 0.0
+    start_date: 2023-05-11
+    end_date: 2023-05-13
+    spatial_overlap: 0.25
     temporal_stride_days: 1
     regions:
       - smoke_test
@@ -95,7 +95,7 @@ splits:
 model:
   type: gsta
   hidden_spatial: 4
-  hidden_temporal: 32
+  hidden_temporal: 48
   spatial_depth: 2
   temporal_depth: 2
   drop: 0.0
