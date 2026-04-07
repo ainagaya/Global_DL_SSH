@@ -9,6 +9,7 @@ Current main entrypoints:
 - `simvp_ddp_training.py`
 - `simvp_predict_ssh.py`
 - `analyze_queries.py`
+- `plot_predictions.py`
 
 Current core support modules:
 
@@ -22,6 +23,7 @@ Current core support modules:
 Debugging utility:
 
 - `analyze_queries.py`
+- `plot_predictions.py`
 
 Main configs:
 
@@ -271,6 +273,43 @@ Design choice:
 - The script includes many inline comments because the user explicitly asked for that.
 
 
+### 12. Add a prediction-plotting debugging script
+
+Decision:
+
+- Add a standalone plotting utility for saved prediction `.npz` files.
+
+Why:
+
+- The user wanted a way to inspect model outputs visually for either a single file or a whole directory.
+- This is useful for debugging whether prediction files contain sensible maps, whether targets line up spatially, and whether outputs are degenerate.
+
+Implementation:
+
+- Added `plot_predictions.py` at the repo root.
+- It accepts either:
+  - one `.npz` file
+  - one directory containing many `.npz` files
+- It plots:
+  - prediction
+  - target
+  - prediction minus target
+- It supports:
+  - `--time-index`
+  - `--channel-index`
+  - `--output-dir`
+  - `--dpi`
+
+Design choice:
+
+- The plotting code is tolerant of `2D`, `3D`, and `4D` arrays because saved predictions may have shapes like:
+  - `[H, W]`
+  - `[C, H, W]`
+  - `[T, H, W]`
+  - `[T, C, H, W]`
+- If bbox is present in the `.npz`, it is used as the longitude/latitude extent in plots.
+
+
 ## Major code structure and behavior
 
 ### `src/config_utils.py`
@@ -453,6 +492,29 @@ Why it matters:
   - bboxes are malformed
   - all queries are duplicates
   - schema differs from expectation
+
+
+### `plot_predictions.py`
+
+Purpose:
+
+- visualize saved `.npz` predictions from the prediction pipeline
+- inspect one file or batch-convert an entire directory
+
+What it plots:
+
+- prediction field
+- target field
+- prediction minus target
+
+Behavior:
+
+- accepts a file or directory
+- writes `.png` outputs
+- uses a shared color scale for prediction and target
+- uses a symmetric color scale for the error map
+- uses bbox as geographic extent if present
+- selects slices with `--time-index` and `--channel-index`
 
 
 ### `src/pytorch_losses.py`
@@ -760,6 +822,8 @@ Ran successfully multiple times:
 - `python3 -m compileall simvp_predict_ssh.py src/oceantaco.py tests/test_oceantaco_adapter.py`
 - `python3 -m compileall simvp_ddp_training.py simvp_predict_ssh.py src/logging_utils.py src/oceantaco.py`
 - `python3 -m compileall simvp_ddp_training.py simvp_predict_ssh.py src/mlflow_utils.py src/logging_utils.py src/oceantaco.py tests`
+- `python3 -m compileall analyze_queries.py`
+- `python3 -m compileall plot_predictions.py`
 
 These passed.
 
@@ -809,6 +873,19 @@ Result in this workspace:
 Consequence:
 
 - `analyze_queries.py` was written to be tolerant of multiple file formats and schemas rather than assuming one observed local export layout
+
+
+### Prediction plotting utility checks
+
+Ran:
+
+- `python3 -m compileall plot_predictions.py`
+
+This passed.
+
+Note:
+
+- No local `.npz` prediction files were available in this workspace to perform a real plotting run against saved predictions.
 
 
 ## Things not fully verified in this environment
@@ -874,6 +951,7 @@ Smoke test:
 - `configs/oceantaco.yaml`
 - `configs/oceantaco_smoke_test.yaml`
 - `analyze_queries.py`
+- `plot_predictions.py`
 - `src/oceantaco.py`
 - `simvp_ddp_training.py`
 - `simvp_predict_ssh.py`

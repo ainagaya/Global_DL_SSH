@@ -52,6 +52,13 @@ Smoke-test inference:
 python3 simvp_predict_ssh.py --config configs/oceantaco_smoke_test.yaml --checkpoint model_weights/simvp_oceantaco_smoke_epoch0.pt
 ```
 
+To visualize prediction outputs saved as `.npz`, use:
+
+```bash
+python3 plot_predictions.py predictions
+python3 plot_predictions.py predictions/example_file.npz --time-index 0 --channel-index 0
+```
+
 Notes for the OceanTACO workflow:
 
 - `splits.<name>.regions: global` uses a global query bbox.
