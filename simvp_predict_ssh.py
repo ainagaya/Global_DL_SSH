@@ -58,6 +58,14 @@ def build_model(config):
     )
 
 
+def nonempty_target_mask(targets: torch.Tensor) -> torch.Tensor:
+    # A target is considered empty if every value across time/channel/grid is
+    # zero. This matches the current loader behavior, where missing/NaN values
+    # are normalized into zero-filled tensors.
+    flattened = targets.reshape(targets.shape[0], -1)
+    return torch.any(flattened != 0, dim=1)
+
+
 def main():
     args = parse_args()
     config = load_config(args.config)
@@ -102,8 +110,8 @@ def main():
         saved_files = 0
         skipped_batches = 0
         zero_input_batches = 0
+        skipped_empty_target_samples = 0
         allow_empty_inputs = bool(prediction_cfg.get("allow_empty_inputs", True))
-        print(f"BATCH: ", batch)
         with torch.no_grad():
             for batch_index, batch in enumerate(dataloader):
                 has_any_inputs = any(tensor is not None for tensor in batch["inputs"].values())
@@ -120,6 +128,28 @@ def main():
                         len(dataloader),
                     )
                 records = prediction_records(batch, config)
+                valid_target_mask = nonempty_target_mask(targets)
+                skipped_in_batch = int((~valid_target_mask).sum().item())
+                if skipped_in_batch:
+                    skipped_empty_target_samples += skipped_in_batch
+                    LOGGER.warning(
+                        "Skipping %s empty-target samples in prediction batch %s/%s",
+                        skipped_in_batch,
+                        batch_index + 1,
+                        len(dataloader),
+                    )
+                if not bool(valid_target_mask.any()):
+                    skipped_batches += 1
+                    LOGGER.warning(
+                        "Skipping prediction batch %s/%s because every target sample is empty.",
+                        batch_index + 1,
+                        len(dataloader),
+                    )
+                    continue
+
+                inputs = inputs[valid_target_mask]
+                targets = targets[valid_target_mask]
+                records = [record for record, keep in zip(records, valid_target_mask.tolist()) if keep]
                 inputs = inputs.to(device)
                 predictions = model(inputs).cpu().numpy()
                 targets = targets.numpy()
@@ -157,14 +187,17 @@ def main():
                     "saved_prediction_files": float(saved_files),
                     "skipped_prediction_batches": float(skipped_batches),
                     "zero_input_prediction_batches": float(zero_input_batches),
+                    "skipped_empty_target_samples": float(skipped_empty_target_samples),
                 },
                 step=0,
             )
             LOGGER.info(
-                "Prediction run finished with saved_prediction_files=%s skipped_prediction_batches=%s zero_input_prediction_batches=%s",
+                "Prediction run finished with saved_prediction_files=%s skipped_prediction_batches=%s "
+                "zero_input_prediction_batches=%s skipped_empty_target_samples=%s",
                 saved_files,
                 skipped_batches,
                 zero_input_batches,
+                skipped_empty_target_samples,
             )
         tracker.end_run()
 

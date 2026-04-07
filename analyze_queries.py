@@ -35,6 +35,11 @@ import pandas as pd
 # - upstream loaders convert NaNs to zeros, so everything looks blank
 
 
+def emit_warning(message: str) -> None:
+    # Keep warnings visually obvious in plain terminal output.
+    print(f"WARNING: {message}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inspect saved query files and optionally validate their loaded data.")
     parser.add_argument(
@@ -296,8 +301,15 @@ def import_runtime_helpers():
     # The data-inspection mode depends on the local project config helpers and
     # the OceanTACO-backed dataset builder. We import lazily so plain metadata
     # inspection still works even when the ML dependencies are not available.
-    from src.config_utils import load_config
-    from src.oceantaco import _build_patched_dataset_class, _import_oceantaco
+    try:
+        from src.config_utils import load_config
+        from src.oceantaco import _build_patched_dataset_class, _import_oceantaco
+    except ImportError as exc:
+        emit_warning(
+            "Data inspection requires the project runtime dependencies, including OceanTACO and its loader stack. "
+            f"Import failed with: {exc}"
+        )
+        raise SystemExit(2) from exc
 
     return load_config, _build_patched_dataset_class, _import_oceantaco
 
