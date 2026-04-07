@@ -277,6 +277,10 @@ Design choice:
 
 - The analyzer is intentionally format-tolerant because this workspace did not currently contain saved query files to lock onto one exact OceanTACO export schema.
 - The script includes many inline comments because the user explicitly asked for that.
+- It now also reports OceanTACO file-index match counts per query so we can
+  distinguish between:
+  - no candidate files being found at all
+  - candidate files existing but variables still loading as empty
 
 
 ### 12. Add a prediction-plotting debugging script
@@ -942,6 +946,10 @@ Smoke test:
 - Training still skips no-input batches by design.
 - Query generation is bbox-based and not projection-based.
 - The current pipeline assumes OceanTACO samples can be normalized and resampled onto the configured grid size.
+- A later debugging hypothesis was that an explicit raw Hugging Face
+  `.../resolve/main/` URL for `taco_path` was not the right kind of dataset root
+  for OceanTACO’s `tacoreader.load(...)`. The adapter was updated to fall back
+  to OceanTACO’s `HF_DEFAULT_URL` when it detects that raw URL pattern.
 
 
 ## Documentation changes made

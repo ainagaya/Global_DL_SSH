@@ -378,7 +378,16 @@ def inspect_query_file_data(path: Path, config_path: str | Path, max_samples: in
 
     data_cfg = config["data"]
     grid_cfg = data_cfg["grid"]
-    taco_path = config["oceantaco"].get("taco_path", HF_DEFAULT_URL)
+    taco_path = config.get("oceantaco", {}).get("taco_path")
+    if not taco_path:
+        taco_path = HF_DEFAULT_URL
+    elif isinstance(taco_path, str) and "huggingface.co/datasets/" in taco_path and "/resolve/main/" in taco_path:
+        print(
+            "data_check_warning:"
+            f" taco_path={taco_path} looks like a raw Hugging Face resolve URL."
+            " Using OceanTACO HF_DEFAULT_URL instead."
+        )
+        taco_path = HF_DEFAULT_URL
     dataset_cls = build_patched_dataset_class(OceanTACODataset, ocean_dataset_module)
     dataset = dataset_cls(
         taco_path=taco_path,
@@ -389,6 +398,31 @@ def inspect_query_file_data(path: Path, config_path: str | Path, max_samples: in
         temporal_agg=data_cfg.get("temporal_agg", "stack"),
         default_patch_size=(int(grid_cfg["height"]), int(grid_cfg["width"])),
     )
+
+    # Before we even inspect loaded variables, it is very useful to know whether
+    # OceanTACO matched any candidate files for each query. If these counts are
+    # all zero, the problem is upstream of variable loading.
+    file_index_counts = [len(file_df) for file_df in getattr(dataset, "_file_index", [])]
+    if file_index_counts:
+        zero_match_queries = sum(count == 0 for count in file_index_counts)
+        print(
+            "file_index_summary:"
+            f" min_matches={min(file_index_counts)}"
+            f" max_matches={max(file_index_counts)}"
+            f" zero_match_queries={zero_match_queries}"
+            f" total_queries={len(file_index_counts)}"
+        )
+
+        observed_sources = Counter()
+        for file_df in dataset._file_index[: min(len(dataset._file_index), max_samples)]:
+            if "data_source" in file_df:
+                observed_sources.update(file_df["data_source"].astype(str).tolist())
+        if observed_sources:
+            print("file_index_data_sources:")
+            for source_name, count in observed_sources.most_common():
+                print(f"  - {source_name}: {count}")
+        else:
+            print("file_index_data_sources: none")
 
     print(
         "data_check:"

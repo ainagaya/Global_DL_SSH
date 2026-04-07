@@ -235,7 +235,16 @@ def build_dataset(config: Dict[str, Any], split_name: str):
     data_cfg = config["data"]
     grid_cfg = data_cfg["grid"]
 
-    taco_path = config["oceantaco"].get("taco_path", HF_DEFAULT_URL)
+    taco_path = config.get("oceantaco", {}).get("taco_path")
+    if not taco_path:
+        taco_path = HF_DEFAULT_URL
+    elif isinstance(taco_path, str) and "huggingface.co/datasets/" in taco_path and "/resolve/main/" in taco_path:
+        LOGGER.warning(
+            "Configured taco_path=%s looks like a raw Hugging Face resolve URL. "
+            "Falling back to OceanTACO HF_DEFAULT_URL because the package expects a dataset root handle.",
+            taco_path,
+        )
+        taco_path = HF_DEFAULT_URL
     queries = build_queries(config, split_name)
     LOGGER.info(
         "Creating OceanTACO dataset for split=%s with %s queries, %s inputs, %s targets, grid=%sx%s",

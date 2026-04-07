@@ -21,7 +21,7 @@ tracking:
     log_prediction_artifacts: false
 
 oceantaco:
-  taco_path: https://huggingface.co/datasets/nilsleh/OceanTACO/resolve/main/
+  taco_path:
 
 regions:
   global:
