@@ -29,6 +29,7 @@ Main configs:
 
 - `configs/oceantaco.yaml`
 - `configs/oceantaco_smoke_test.yaml`
+- `configs/oceantaco_gulf_stream.yaml`
 
 
 ## High-level decisions taken
@@ -634,6 +635,24 @@ Characteristics:
 - lighter model
 - `epochs: 1`
 - `amp: false`
+- `prediction.allow_empty_inputs: true`
+
+
+### `configs/oceantaco_gulf_stream.yaml`
+
+Regional 2025 experiment config for the Gulf Stream.
+
+Characteristics:
+
+- Gulf Stream bbox in the western North Atlantic:
+  `[-80.0, -50.0, 30.0, 45.0]`
+- `2025` train / validation / test splits
+- `3.0 deg` patch size
+- `96x96` grid
+- `5`-frame sequences with center target index
+- moderate query count for training (`64`)
+- mid-sized model compared to the smoke test
+- `15` epochs for a more meaningful result than a smoke run
 - `prediction.allow_empty_inputs: true`
 
 

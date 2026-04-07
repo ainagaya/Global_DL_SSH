@@ -1,0 +1,117 @@
+paths:
+  weights_dir: ./model_weights
+  logs_dir: ./loss_logs
+  predictions_dir: ./predictions
+  queries_dir: ./queries
+
+logging:
+  level: INFO
+
+tracking:
+  mlflow:
+    enabled: false
+    tracking_uri: ./mlruns
+    experiment_name: Global_DL_SSH
+    run_name:
+    tags: {}
+    log_params: true
+    log_config_artifact: true
+    log_checkpoints: true
+    log_loss_csv: true
+    log_prediction_artifacts: false
+
+oceantaco:
+  taco_path:
+
+regions:
+  global:
+    bbox: [-180.0, 180.0, -60.0, 60.0]
+  gulf_stream:
+    bbox: [-80.0, -50.0, 30.0, 45.0]
+
+queries:
+  patch_size:
+    value: 3.0
+    unit: deg
+  land_mask_path:
+  max_land_fraction: 0.5
+  max_spatial_overlap: 0.75
+  oversample_factor: 2.5
+  spatial_overlap: 0.25
+  temporal_stride_days: 1
+  verbose: false
+
+data:
+  sequence_length: 5
+  target_index: 2
+  temporal_agg: stack
+  grid:
+    height: 96
+    width: 96
+  inputs:
+    - key: l3_ssh
+      normalize:
+        mean: 0.074
+        std: 0.0986
+        mask_zeros: true
+    - key: l4_sst
+      normalize:
+        mean: 20.157
+        std: 8.726
+        min_valid: -5.0
+        mask_zeros: true
+  targets:
+    - key: l3_swot
+      normalize:
+        mean: 0.074
+        std: 0.0986
+        mask_zeros: true
+
+splits:
+  train:
+    strategy: training
+    start_date: 2025-01-15
+    end_date: 2025-03-15
+    n_queries: 64
+    regions:
+      - gulf_stream
+  validation:
+    strategy: evaluation
+    start_date: 2025-03-16
+    end_date: 2025-03-31
+    spatial_overlap: 0.25
+    temporal_stride_days: 2
+    regions:
+      - gulf_stream
+  test:
+    strategy: evaluation
+    start_date: 2025-04-01
+    end_date: 2025-04-15
+    spatial_overlap: 0.25
+    temporal_stride_days: 2
+    regions:
+      - gulf_stream
+
+model:
+  type: gsta
+  hidden_spatial: 8
+  hidden_temporal: 64
+  spatial_depth: 3
+  temporal_depth: 3
+  drop: 0.1
+  drop_path: 0.05
+
+training:
+  batch_size: 2
+  num_workers: 0
+  learning_rate: 0.001
+  epochs: 15
+  amp: true
+  shuffle: true
+  seed: 42
+  checkpoint_name: simvp_oceantaco_gulf_stream_2025
+
+prediction:
+  split: test
+  batch_size: 1
+  allow_empty_inputs: true

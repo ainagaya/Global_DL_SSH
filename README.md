@@ -14,6 +14,8 @@ The main configuration lives in [`configs/oceantaco.yaml`](configs/oceantaco.yam
 
 For a quick pipeline sanity check, use [`configs/oceantaco_smoke_test.yaml`](configs/oceantaco_smoke_test.yaml). It is still lightweight, but it now uses the same broad North Pacific region as the main config, a slightly longer date window, a few more queries, and a `64x64` grid so you are more likely to get preliminary but meaningful outputs while keeping runtime short.
 
+For a more meaningful regional experiment in 2025, use [`configs/oceantaco_gulf_stream.yaml`](configs/oceantaco_gulf_stream.yaml). It targets the Gulf Stream region in the western North Atlantic with a larger grid, `5`-frame sequences, more training queries, and `15` epochs.
+
 MLflow tracking is configured in the same YAML under `tracking.mlflow`. By default it is disabled. To enable local tracking, set:
 
 ```yaml
