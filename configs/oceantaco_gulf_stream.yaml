@@ -9,7 +9,7 @@ logging:
 
 tracking:
   mlflow:
-    enabled: false
+    enabled: true
     tracking_uri: ./mlruns
     experiment_name: Global_DL_SSH
     run_name:
@@ -79,16 +79,16 @@ splits:
     strategy: evaluation
     start_date: 2025-03-16
     end_date: 2025-03-31
-    spatial_overlap: 0.25
-    temporal_stride_days: 2
+    spatial_overlap: 0.0
+    temporal_stride_days: 4
     regions:
       - gulf_stream
   test:
     strategy: evaluation
     start_date: 2025-04-01
     end_date: 2025-04-15
-    spatial_overlap: 0.25
-    temporal_stride_days: 2
+    spatial_overlap: 0.0
+    temporal_stride_days: 4
     regions:
       - gulf_stream
 
