@@ -114,8 +114,11 @@ def main():
         allow_empty_inputs = bool(prediction_cfg.get("allow_empty_inputs", True))
         with torch.no_grad():
             for batch_index, batch in enumerate(dataloader):
+                print(f"BATCH: ", batch)
                 has_any_inputs = any(tensor is not None for tensor in batch["inputs"].values())
                 inputs, targets = batch_to_model_tensors(batch, config, allow_empty_inputs=allow_empty_inputs)
+                print(f"Inputs: {inputs}, Targets: {targets}")
+                print(f"Batch: {batch}, Config: {config}")
                 if inputs is None:
                     skipped_batches += 1
                     LOGGER.warning("Skipping empty prediction batch %s/%s", batch_index + 1, len(dataloader))
