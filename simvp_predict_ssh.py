@@ -1,4 +1,5 @@
 import argparse
+import copy
 import logging
 import sys
 from pathlib import Path
@@ -66,20 +67,58 @@ def nonempty_target_mask(targets: torch.Tensor) -> torch.Tensor:
     return torch.any(flattened != 0, dim=1)
 
 
+def _load_checkpoint_training_config(checkpoint: dict) -> dict | None:
+    config_snapshot = checkpoint.get("config_snapshot")
+    if isinstance(config_snapshot, dict):
+        return copy.deepcopy(config_snapshot)
+
+    config_path = checkpoint.get("config_path")
+    if not config_path:
+        return None
+
+    config_file = Path(config_path)
+    if not config_file.exists():
+        LOGGER.warning(
+            "Checkpoint references training config %s, but that file is not available in this environment.",
+            config_path,
+        )
+        return None
+    return load_config(config_file)
+
+
+def _merge_prediction_runtime_config(runtime_config: dict, checkpoint_config: dict | None) -> dict:
+    effective_config = copy.deepcopy(runtime_config)
+    if checkpoint_config is None:
+        return effective_config
+
+    for key in ("data", "model"):
+        if key in checkpoint_config:
+            effective_config[key] = copy.deepcopy(checkpoint_config[key])
+
+    LOGGER.info(
+        "Using data/model settings from checkpoint training config %s",
+        checkpoint_config.get("__config_path__", "<embedded config snapshot>"),
+    )
+    return effective_config
+
+
 def main():
     args = parse_args()
-    config = load_config(args.config)
-    configure_logging(config)
-    prediction_cfg = config["prediction"]
+    runtime_config = load_config(args.config)
+    configure_logging(runtime_config)
+    prediction_cfg = runtime_config["prediction"]
     split_name = args.split or prediction_cfg["split"]
-    tracker = MLflowTracker(config, stage="prediction")
-    LOGGER.info("Loaded prediction config from %s", config["__config_path__"])
+    tracker = MLflowTracker(runtime_config, stage="prediction")
+    LOGGER.info("Loaded prediction config from %s", runtime_config["__config_path__"])
 
     tracker.start_run(
         run_name=prediction_cfg.get("run_name"),
         extra_tags={"split": split_name, "checkpoint": str(Path(args.checkpoint).name)},
     )
     try:
+        checkpoint = torch.load(Path(args.checkpoint), map_location="cpu")
+        checkpoint_config = _load_checkpoint_training_config(checkpoint)
+        config = _merge_prediction_runtime_config(runtime_config, checkpoint_config)
         dataset = build_dataset(config, split_name)
         if len(dataset) == 0:
             raise RuntimeError(f"No OceanTACO samples matched split '{split_name}'.")
@@ -94,7 +133,6 @@ def main():
         )
 
         output_dir = ensure_dir(config["paths"]["predictions_dir"], config)
-        checkpoint = torch.load(Path(args.checkpoint), map_location="cpu")
         LOGGER.info("Writing predictions to %s", output_dir)
         LOGGER.info("Loaded checkpoint from %s", args.checkpoint)
         tracker.log_config()
@@ -103,7 +141,14 @@ def main():
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = build_model(config).to(device)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        try:
+            model.load_state_dict(checkpoint["model_state_dict"])
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "Checkpoint architecture does not match the prediction model configuration. "
+                "Use the training config that produced this checkpoint, or re-save the checkpoint "
+                "with an embedded config snapshot by training again with the updated script."
+            ) from exc
         model.eval()
         LOGGER.info("Using device=%s for inference", device)
 

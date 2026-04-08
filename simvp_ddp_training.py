@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 import logging
 import random
@@ -219,6 +220,7 @@ def main():
                 "train_loss": train_loss,
                 "val_loss": val_loss,
                 "config_path": config["__config_path__"],
+                "config_snapshot": copy.deepcopy(config),
             }
             checkpoint_path = weights_dir / f"{checkpoint_name}_epoch{epoch}.pt"
             torch.save(checkpoint, checkpoint_path)
