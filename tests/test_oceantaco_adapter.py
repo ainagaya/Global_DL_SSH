@@ -108,6 +108,45 @@ def test_batch_input_fields_can_return_raw_unnormalised_inputs(base_config):
     assert not torch.all(normalised_inputs["l4_sst"] == 25.0)
 
 
+def test_batch_input_fields_convert_kelvin_sst_and_mask_invalid_values(base_config):
+    batch = {
+        "inputs": {
+            "l3_ssh": torch.ones(1, 2, 2),
+            "l4_sst": torch.tensor([[[300.0, 0.0], [301.0, 299.0]]]),
+        },
+        "targets": {
+            "l3_swot": torch.ones(1, 2, 2),
+        },
+        "metadata": {"bboxes": [], "time_ranges": []},
+    }
+
+    raw_inputs = batch_input_fields(batch, base_config, normalise=False)
+    normalised_inputs = batch_input_fields(batch, base_config, normalise=True)
+
+    assert raw_inputs is not None
+    assert torch.isclose(raw_inputs["l4_sst"][0, 0, 0, 0], torch.tensor(26.85), atol=1e-4)
+    assert raw_inputs["l4_sst"][0, 0, 0, 1] == 0.0
+    assert torch.isclose(normalised_inputs["l4_sst"][0, 0, 0, 0], torch.tensor((26.85 - 20.157) / 8.726), atol=1e-4)
+
+
+def test_batch_input_fields_preserve_celsius_sst_without_double_conversion(base_config):
+    batch = {
+        "inputs": {
+            "l3_ssh": torch.ones(1, 2, 2),
+            "l4_sst": torch.full((1, 2, 2), 25.0),
+        },
+        "targets": {
+            "l3_swot": torch.ones(1, 2, 2),
+        },
+        "metadata": {"bboxes": [], "time_ranges": []},
+    }
+
+    raw_inputs = batch_input_fields(batch, base_config, normalise=False)
+
+    assert raw_inputs is not None
+    assert torch.all(raw_inputs["l4_sst"] == 25.0)
+
+
 def test_prediction_records_uses_target_index(base_config):
     batch = {
         "metadata": {
@@ -210,7 +249,7 @@ def test_patched_dataset_retries_transient_load_failures():
     assert dataset.calls == 3
 
 
-def test_patched_dataset_converts_sst_to_celsius_on_successful_upstream_load():
+def test_patched_dataset_preserves_successful_upstream_load_shape():
     class FakeBaseDataset:
         def __init__(self, *args, **kwargs):
             pass
@@ -228,4 +267,4 @@ def test_patched_dataset_converts_sst_to_celsius_on_successful_upstream_load():
 
     result = dataset._load_variable("l4_sst", None, (0.0, 1.0, 2.0, 3.0))
 
-    assert torch.allclose(result["data"], torch.full((1, 2, 2), 26.85))
+    assert result["data"].shape == (1, 2, 2)

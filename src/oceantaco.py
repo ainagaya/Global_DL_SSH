@@ -135,9 +135,6 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
             if data is None:
                 return result
 
-            if var == "l4_sst":
-                data = data - 273.15
-
             updated = dict(result)
             updated["data"] = data
             return updated
@@ -396,15 +393,40 @@ def get_collate_fn():
     return collate_ocean_samples
 
 
-def _normalise_tensor(tensor: torch.Tensor, source_cfg: Dict[str, Any]) -> torch.Tensor:
-    norm_cfg = source_cfg.get("normalize")
-    if not norm_cfg:
+def _convert_sst_to_celsius_if_needed(var: str, tensor: torch.Tensor) -> torch.Tensor:
+    if var != "l4_sst":
         return tensor
 
-    output = tensor.clone()
+    finite = tensor[torch.isfinite(tensor)]
+    if finite.numel() == 0:
+        return tensor
+
+    # OceanTACO SST may arrive in Kelvin or Celsius depending on the loader path.
+    # Use a conservative threshold so typical Celsius fields are left untouched.
+    if float(finite.max().item()) > 200.0:
+        return tensor - 273.15
+    return tensor
+
+
+def _preprocess_tensor(tensor: torch.Tensor, source_cfg: Dict[str, Any]) -> torch.Tensor:
+    output = torch.nan_to_num(tensor.clone(), nan=0.0)
+    output = _convert_sst_to_celsius_if_needed(source_cfg["key"], output)
+
+    norm_cfg = source_cfg.get("normalize")
+    if not norm_cfg:
+        return output
+
     min_valid = norm_cfg.get("min_valid")
     if min_valid is not None:
         output[output < float(min_valid)] = 0.0
+    return output
+
+
+def _normalise_tensor(tensor: torch.Tensor, source_cfg: Dict[str, Any]) -> torch.Tensor:
+    output = _preprocess_tensor(tensor, source_cfg)
+    norm_cfg = source_cfg.get("normalize")
+    if not norm_cfg:
+        return output
 
     mean = norm_cfg.get("mean")
     std = norm_cfg.get("std")
@@ -451,7 +473,7 @@ def _prepare_variable_tensor(
 
     if normalise:
         return _normalise_tensor(output, source_cfg)
-    return output
+    return _preprocess_tensor(output, source_cfg)
 
 
 def batch_input_fields(batch: Dict[str, Any], config: Dict[str, Any], normalise: bool = True) -> Dict[str, torch.Tensor] | None:
