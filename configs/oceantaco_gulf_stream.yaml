@@ -9,7 +9,7 @@ logging:
 
 tracking:
   mlflow:
-    enabled: true
+    enabled: false
     tracking_uri: ./mlruns
     experiment_name: Global_DL_SSH
     run_name:
@@ -27,7 +27,7 @@ regions:
   global:
     bbox: [-180.0, 180.0, -60.0, 60.0]
   gulf_stream:
-    bbox: [-80.0, -50.0, 30.0, 45.0]
+    bbox: [-65.0, -60.0, 30.0, 35.0]
 
 queries:
   patch_size:
