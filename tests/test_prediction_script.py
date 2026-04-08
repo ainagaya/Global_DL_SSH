@@ -75,3 +75,21 @@ def test_sample_plot_input_fields_uses_raw_sample_tensor_without_collate_padding
     assert fields is not None
     assert fields["l4_sst"].shape == (5, 94, 94)
     assert torch.all(fields["l4_sst"] == 25.0)
+
+
+def test_sample_plot_input_fields_handles_single_2d_raw_sample(base_config):
+    sample = {
+        "inputs": {
+            "l3_ssh": {"data": torch.ones(96, 96)},
+            "l4_sst": {"data": torch.full((96, 96), 25.0)},
+        },
+        "targets": {"l3_swot": {"data": torch.ones(96, 96)}},
+        "metadata": {"bbox": (0.0, 1.0, 2.0, 3.0), "time_range": ("2025-04-01", "2025-04-05")},
+    }
+
+    fields = prediction_script.sample_plot_input_fields(sample, base_config)
+
+    assert fields is not None
+    assert fields["l3_ssh"].shape == (5, 96, 96)
+    assert fields["l4_sst"].shape == (5, 96, 96)
+    assert torch.all(fields["l4_sst"] == 25.0)

@@ -89,14 +89,28 @@ def build_prediction_collate_fn():
     return collate_with_raw_samples
 
 
+def _as_single_sample_batch_tensor(tensor: torch.Tensor | None) -> torch.Tensor | None:
+    if tensor is None:
+        return None
+
+    output = tensor.float()
+    if output.ndim == 2:
+        return output.unsqueeze(0)
+    if output.ndim == 3:
+        return output.unsqueeze(0)
+    if output.ndim == 4:
+        return output
+    raise ValueError(f"Unsupported raw sample tensor shape: {tuple(output.shape)}")
+
+
 def sample_plot_input_fields(sample: dict, config: dict) -> dict[str, torch.Tensor] | None:
     single_sample_batch = {
         "inputs": {
-            variable_name: None if payload is None else payload.get("data")
+            variable_name: _as_single_sample_batch_tensor(None if payload is None else payload.get("data"))
             for variable_name, payload in sample.get("inputs", {}).items()
         },
         "targets": {
-            variable_name: None if payload is None else payload.get("data")
+            variable_name: _as_single_sample_batch_tensor(None if payload is None else payload.get("data"))
             for variable_name, payload in sample.get("targets", {}).items()
         },
         "metadata": {

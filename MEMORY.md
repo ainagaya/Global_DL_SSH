@@ -1081,6 +1081,11 @@ Smoke test:
   saved `input_l4_sst`. Prediction export now preserves `raw_samples` during
   collation and saves plot/debug inputs from the original per-sample payloads
   instead of the padded batch representation.
+- A follow-up exporter bug appeared after that change: raw per-sample payloads
+  may arrive as plain 2D `(H, W)` tensors or 3D `(T, H, W)` tensors, not in the
+  batched shapes expected by `batch_input_fields()`. Prediction export now
+  reshapes raw sample tensors into a true single-sample batch before applying
+  the shared preprocessing path.
 
 
 ## Documentation changes made
