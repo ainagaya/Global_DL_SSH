@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from src.oceantaco import (
+    _build_patched_dataset_class,
     _resolve_bbox,
     _split_region_bboxes,
     batch_to_model_tensors,
@@ -151,3 +152,38 @@ def test_build_queries_uses_oceantaco_query_generator(base_config, monkeypatch):
     assert calls[0][0] == "train"
     assert calls[0][1]["time_window_days"] == 5
     assert calls[0][1]["bbox_constraint"] == (90.0, 95.0, -5.0, 5.0)
+
+
+def test_patched_dataset_retries_transient_load_failures():
+    class FakeHTTPError(Exception):
+        def __init__(self, status_code):
+            self.response = types.SimpleNamespace(status_code=status_code)
+            super().__init__(f"{status_code} Server Error")
+
+    class FakeBaseDataset:
+        def __init__(self, *args, **kwargs):
+            self.calls = 0
+
+        def _load_variable(self, var, file_df, bbox):
+            self.calls += 1
+            if self.calls < 3:
+                raise FakeHTTPError(504)
+            return {"data": "ok", "lats": None, "lons": None}
+
+    fake_dataset_module = types.SimpleNamespace(
+        VAR_NAMES={},
+        COL_VSI="vsi",
+        POINT_SOURCES=set(),
+        GridMerger=None,
+        load_netcdf_var=None,
+        _interpolate_to_patch=None,
+        np=None,
+        torch=None,
+    )
+    dataset_cls = _build_patched_dataset_class(FakeBaseDataset, fake_dataset_module)
+    dataset = dataset_cls(retry_attempts=3, retry_backoff_seconds=0.0)
+
+    result = dataset._load_variable("l4_sst", None, (0.0, 1.0, 2.0, 3.0))
+
+    assert result == {"data": "ok", "lats": None, "lons": None}
+    assert dataset.calls == 3

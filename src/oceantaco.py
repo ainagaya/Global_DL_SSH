@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import time
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -12,6 +13,11 @@ from src.config_utils import ensure_dir, get_split_config
 
 DEFAULT_GLOBAL_BBOX = (-180.0, 180.0, -60.0, 60.0)
 LOGGER = logging.getLogger(__name__)
+
+DEFAULT_RETRY_ATTEMPTS = 3
+DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
+DEFAULT_RETRY_BACKOFF_MULTIPLIER = 2.0
+DEFAULT_RETRY_STATUS_CODES = (429, 500, 502, 503, 504)
 
 
 def _import_oceantaco():
@@ -32,6 +38,37 @@ def _is_mergeable_grid(data) -> bool:
     return getattr(data, "ndim", 0) >= 2 and all(dim > 0 for dim in data.shape[-2:])
 
 
+def _extract_status_code(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status_code = getattr(response, "status_code", None)
+        if status_code is not None:
+            return int(status_code)
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        return int(status_code)
+    return None
+
+
+def _is_transient_data_error(exc: Exception, retry_status_codes: tuple[int, ...]) -> bool:
+    status_code = _extract_status_code(exc)
+    if status_code is not None:
+        return status_code in retry_status_codes
+
+    message = str(exc).lower()
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "temporary failure",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "server disconnected",
+        "remote end closed connection",
+    )
+    return any(marker in message for marker in transient_markers)
+
+
 def _build_patched_dataset_class(base_cls, ocean_dataset_module):
     class PatchedOceanTACODataset(base_cls):
         """Compatibility wrapper around OceanTACO's dataset loader.
@@ -45,9 +82,57 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
         `IndexError: tuple index out of range` issue we saw earlier.
         """
 
+        def __init__(
+            self,
+            *args,
+            retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+            retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+            retry_backoff_multiplier: float = DEFAULT_RETRY_BACKOFF_MULTIPLIER,
+            retry_status_codes: tuple[int, ...] = DEFAULT_RETRY_STATUS_CODES,
+            **kwargs,
+        ):
+            super().__init__(*args, **kwargs)
+            self.retry_attempts = max(1, int(retry_attempts))
+            self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+            self.retry_backoff_multiplier = max(1.0, float(retry_backoff_multiplier))
+            self.retry_status_codes = tuple(int(code) for code in retry_status_codes)
+
+        def _sleep_before_retry(self, attempt: int) -> None:
+            if self.retry_backoff_seconds <= 0:
+                return
+            delay = self.retry_backoff_seconds * (self.retry_backoff_multiplier ** max(0, attempt - 1))
+            time.sleep(delay)
+
+        def _load_with_retry(self, loader_name, loader, *args):
+            for attempt in range(1, self.retry_attempts + 1):
+                try:
+                    return loader(*args)
+                except Exception as exc:
+                    if not _is_transient_data_error(exc, self.retry_status_codes):
+                        raise
+                    if attempt >= self.retry_attempts:
+                        LOGGER.error(
+                            "Skipping transiently unavailable OceanTACO %s after %s attempts: %s",
+                            loader_name,
+                            attempt,
+                            exc,
+                        )
+                        return None
+                    LOGGER.warning(
+                        "Retrying OceanTACO %s after transient failure (%s/%s): %s",
+                        loader_name,
+                        attempt,
+                        self.retry_attempts,
+                        exc,
+                    )
+                    self._sleep_before_retry(attempt)
+
         def _load_variable(self, var, file_df, bbox):
             try:
-                return super()._load_variable(var, file_df, bbox)
+                result = self._load_with_retry("variable load", super()._load_variable, var, file_df, bbox)
+                if result is None:
+                    return None
+                return result
             except (IndexError, ValueError) as exc:
                 LOGGER.warning(
                     "Falling back to defensive _load_variable for var=%s bbox=%s due to %s",
@@ -74,7 +159,13 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
 
             for _, row in var_df.iterrows():
                 vsi_path = row[ocean_dataset_module.COL_VSI]
-                result = ocean_dataset_module.load_netcdf_var(vsi_path, nc_var, bbox)
+                result = self._load_with_retry(
+                    f"fragment load for {var}",
+                    ocean_dataset_module.load_netcdf_var,
+                    vsi_path,
+                    nc_var,
+                    bbox,
+                )
                 if not result:
                     continue
                 data, lats, lons = result
@@ -270,6 +361,7 @@ def build_dataset(config: Dict[str, Any], split_name: str):
         int(grid_cfg["width"]),
     )
     dataset_cls = _build_patched_dataset_class(OceanTACODataset, ocean_dataset_module)
+    retry_cfg = config.get("oceantaco", {}).get("retry", {})
     dataset = dataset_cls(
         taco_path=taco_path,
         queries=queries,
@@ -278,6 +370,10 @@ def build_dataset(config: Dict[str, Any], split_name: str):
         target_resolution=data_cfg.get("target_resolution"),
         temporal_agg=data_cfg.get("temporal_agg", "stack"),
         default_patch_size=(int(grid_cfg["height"]), int(grid_cfg["width"])),
+        retry_attempts=retry_cfg.get("attempts", DEFAULT_RETRY_ATTEMPTS),
+        retry_backoff_seconds=retry_cfg.get("backoff_seconds", DEFAULT_RETRY_BACKOFF_SECONDS),
+        retry_backoff_multiplier=retry_cfg.get("backoff_multiplier", DEFAULT_RETRY_BACKOFF_MULTIPLIER),
+        retry_status_codes=tuple(retry_cfg.get("status_codes", DEFAULT_RETRY_STATUS_CODES)),
     )
     LOGGER.info("Dataset ready for split=%s with %s samples", split_name, len(dataset))
     return dataset
