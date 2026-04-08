@@ -127,12 +127,27 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
                     )
                     self._sleep_before_retry(attempt)
 
+        def _postprocess_loaded_variable(self, var, result):
+            if result is None:
+                return None
+
+            data = result.get("data")
+            if data is None:
+                return result
+
+            if var == "l4_sst":
+                data = data - 273.15
+
+            updated = dict(result)
+            updated["data"] = data
+            return updated
+
         def _load_variable(self, var, file_df, bbox):
             try:
                 result = self._load_with_retry("variable load", super()._load_variable, var, file_df, bbox)
                 if result is None:
                     return None
-                return result
+                return self._postprocess_loaded_variable(var, result)
             except (IndexError, ValueError) as exc:
                 LOGGER.warning(
                     "Falling back to defensive _load_variable for var=%s bbox=%s due to %s",
@@ -190,9 +205,6 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
             else:
                 return None
 
-            if var == "l4_sst":
-                data = data - 273.15
-
             if var not in ocean_dataset_module.POINT_SOURCES and self.default_patch_size is not None:
                 target_size = self.patch_sizes.get(var, self.default_patch_size)
                 if data.shape[-2:] != target_size:
@@ -206,7 +218,7 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
             if data.ndim > 2 and data.shape[0] == 1:
                 data = data.squeeze(0)
 
-            return {
+            return self._postprocess_loaded_variable(var, {
                 "data": ocean_dataset_module.torch.from_numpy(data.astype(ocean_dataset_module.np.float32)),
                 "lats": ocean_dataset_module.torch.from_numpy(lats_out.astype(ocean_dataset_module.np.float32))
                 if lats_out is not None
@@ -214,7 +226,7 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
                 "lons": ocean_dataset_module.torch.from_numpy(lons_out.astype(ocean_dataset_module.np.float32))
                 if lons_out is not None
                 else None,
-            }
+            })
 
     return PatchedOceanTACODataset
 

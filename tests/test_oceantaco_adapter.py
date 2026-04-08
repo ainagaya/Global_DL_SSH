@@ -208,3 +208,24 @@ def test_patched_dataset_retries_transient_load_failures():
 
     assert result == {"data": "ok", "lats": None, "lons": None}
     assert dataset.calls == 3
+
+
+def test_patched_dataset_converts_sst_to_celsius_on_successful_upstream_load():
+    class FakeBaseDataset:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def _load_variable(self, var, file_df, bbox):
+            return {
+                "data": torch.full((1, 2, 2), 300.0),
+                "lats": None,
+                "lons": None,
+            }
+
+    fake_dataset_module = types.SimpleNamespace()
+    dataset_cls = _build_patched_dataset_class(FakeBaseDataset, fake_dataset_module)
+    dataset = dataset_cls(retry_attempts=1, retry_backoff_seconds=0.0)
+
+    result = dataset._load_variable("l4_sst", None, (0.0, 1.0, 2.0, 3.0))
+
+    assert torch.allclose(result["data"], torch.full((1, 2, 2), 26.85))
