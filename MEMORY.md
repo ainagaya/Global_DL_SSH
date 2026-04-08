@@ -371,6 +371,22 @@ Important behavior:
 - The remaining suspect stage is sample-level SST loading:
   - matched `l4_sst` files may still produce empty windows for a specific bbox
   - or loaded SST values may become entirely invalid during window extraction / sanitization
+  - a later downloaded prediction artifact showed an especially misleading case:
+    - `input_l4_sst_present=True`
+    - field was mostly `NaN`
+    - only a thin border remained finite
+    - all finite values were exactly `0`
+- This means `all_zero=0` in `analyze_queries.py` is not enough to guarantee a useful SST field.
+- Degenerate sparse-zero SST fields should be treated as effectively missing for plotting/export.
+- A likely bug in the previous export path was that prediction artifacts were not
+  saved directly from the collated dataset tensors. Instead, the exporter
+  re-ran local preprocessing on batch inputs before writing `.npz` files.
+- Because `analyze_queries.py` inspects dataset samples directly, while the
+  exporter had its own transformation path, the two could disagree even for the
+  same query.
+- The safer rule is:
+  - use dataset/collate output directly for plot/debug artifacts
+  - use separate model preprocessing only for model inputs
 
 
 ### 14. Training throughput controls
@@ -1057,6 +1073,14 @@ Smoke test:
   non-2D fragments before OceanTACO had a chance to handle them. The adapter was
   changed to try OceanTACO’s original `_load_variable()` first and only use the
   defensive fallback if upstream raises `IndexError` or `ValueError`.
+- A later SST debugging finding was that `analyze_queries.py` inspects raw
+  dataset samples before DataLoader collation, while prediction export was
+  previously saving SST from the post-collate batch tensors. OceanTACO’s
+  upstream `collate_ocean_samples()` pads variable-size tensors with zeros on
+  the bottom/right edges, which can create misleading sparse border artifacts in
+  saved `input_l4_sst`. Prediction export now preserves `raw_samples` during
+  collation and saves plot/debug inputs from the original per-sample payloads
+  instead of the padded batch representation.
 
 
 ## Documentation changes made

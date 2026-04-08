@@ -67,6 +67,52 @@ def nonempty_target_mask(targets: torch.Tensor) -> torch.Tensor:
     return torch.any(flattened != 0, dim=1)
 
 
+def is_degenerate_input_field(field: np.ndarray) -> bool:
+    finite = field[np.isfinite(field)]
+    if finite.size == 0:
+        return True
+
+    finite_fraction = float(finite.size) / float(field.size)
+    if finite_fraction < 0.1 and np.allclose(finite, 0.0):
+        return True
+    return False
+
+
+def build_prediction_collate_fn():
+    base_collate = get_collate_fn()
+
+    def collate_with_raw_samples(batch):
+        collated = base_collate(batch)
+        collated["raw_samples"] = batch
+        return collated
+
+    return collate_with_raw_samples
+
+
+def sample_plot_input_fields(sample: dict, config: dict) -> dict[str, torch.Tensor] | None:
+    single_sample_batch = {
+        "inputs": {
+            variable_name: None if payload is None else payload.get("data")
+            for variable_name, payload in sample.get("inputs", {}).items()
+        },
+        "targets": {
+            variable_name: None if payload is None else payload.get("data")
+            for variable_name, payload in sample.get("targets", {}).items()
+        },
+        "metadata": {
+            "bboxes": [sample.get("metadata", {}).get("bbox")],
+            "time_ranges": [sample.get("metadata", {}).get("time_range")],
+        },
+    }
+    prepared = batch_input_fields(single_sample_batch, config, normalise=False, preserve_missing=True)
+    if prepared is None:
+        return None
+    return {
+        variable_name: tensor[0]
+        for variable_name, tensor in prepared.items()
+    }
+
+
 def _load_checkpoint_training_config(checkpoint: dict) -> dict | None:
     config_snapshot = checkpoint.get("config_snapshot")
     if isinstance(config_snapshot, dict):
@@ -129,7 +175,7 @@ def main():
             batch_size=int(prediction_cfg["batch_size"]),
             shuffle=False,
             num_workers=int(config["training"]["num_workers"]),
-            collate_fn=get_collate_fn(),
+            collate_fn=build_prediction_collate_fn(),
         )
 
         output_dir = ensure_dir(config["paths"]["predictions_dir"], config)
@@ -183,7 +229,7 @@ def main():
                     )
                 records = prediction_records(batch, config)
                 valid_target_mask = nonempty_target_mask(targets)
-                raw_input_fields = batch_input_fields(batch, config, normalise=False, preserve_missing=True)
+                raw_samples = batch.get("raw_samples")
                 skipped_in_batch = int((~valid_target_mask).sum().item())
                 if skipped_in_batch:
                     skipped_empty_target_samples += skipped_in_batch
@@ -205,11 +251,10 @@ def main():
                 inputs = inputs[valid_target_mask]
                 targets = targets[valid_target_mask]
                 records = [record for record, keep in zip(records, valid_target_mask.tolist()) if keep]
+                raw_samples = None if raw_samples is None else [
+                    sample for sample, keep in zip(raw_samples, valid_target_mask.tolist()) if keep
+                ]
                 inputs_cpu = inputs.cpu().numpy()
-                raw_l3_ssh = None if raw_input_fields is None else raw_input_fields.get("l3_ssh")
-                raw_l4_sst = None if raw_input_fields is None else raw_input_fields.get("l4_sst")
-                raw_l3_ssh_np = None if raw_l3_ssh is None else raw_l3_ssh[valid_target_mask].cpu().numpy()
-                raw_l4_sst_np = None if raw_l4_sst is None else raw_l4_sst[valid_target_mask].cpu().numpy()
                 inputs = inputs.to(device)
                 predictions = model(inputs).cpu().numpy()
                 targets = targets.numpy()
@@ -217,6 +262,11 @@ def main():
                 batch_size = predictions.shape[0]
                 for sample_index in range(batch_size):
                     record = records[sample_index]
+                    sample_input_fields = None if raw_samples is None else sample_plot_input_fields(raw_samples[sample_index], config)
+                    sample_l3_ssh = None if sample_input_fields is None else sample_input_fields.get("l3_ssh")
+                    sample_l4_sst = None if sample_input_fields is None else sample_input_fields.get("l4_sst")
+                    sample_l3_ssh_np = None if sample_l3_ssh is None else sample_l3_ssh.cpu().numpy()
+                    sample_l4_sst_np = None if sample_l4_sst is None else sample_l4_sst.cpu().numpy()
                     lon_min, lon_max, lat_min, lat_max = record["bbox"]
                     target_date = record["target_date"]
                     save_path = output_dir / (
@@ -227,10 +277,18 @@ def main():
                         save_path,
                         prediction=predictions[sample_index],
                         target=targets[sample_index],
-                        input_l3_ssh=raw_l3_ssh_np[sample_index] if raw_l3_ssh_np is not None else inputs_cpu[sample_index, :, 0],
-                        input_l4_sst=raw_l4_sst_np[sample_index] if raw_l4_sst_np is not None else None,
-                        input_l3_ssh_present="l3_ssh" in present_inputs,
-                        input_l4_sst_present="l4_sst" in present_inputs,
+                        input_l3_ssh=sample_l3_ssh_np if sample_l3_ssh_np is not None else inputs_cpu[sample_index, :, 0],
+                        input_l4_sst=sample_l4_sst_np if sample_l4_sst_np is not None else None,
+                        input_l3_ssh_present=(
+                            "l3_ssh" in present_inputs
+                            and sample_l3_ssh_np is not None
+                            and not is_degenerate_input_field(sample_l3_ssh_np)
+                        ),
+                        input_l4_sst_present=(
+                            "l4_sst" in present_inputs
+                            and sample_l4_sst_np is not None
+                            and not is_degenerate_input_field(sample_l4_sst_np)
+                        ),
                         bbox=np.array(record["bbox"], dtype=np.float32),
                         time_range=np.array(record["time_range"]),
                         target_date=target_date,

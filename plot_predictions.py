@@ -155,7 +155,13 @@ def is_missing_field(field_2d: np.ndarray | None, present_flag: bool | None = No
     if field_2d is None:
         return True
     finite = field_2d[np.isfinite(field_2d)]
-    return finite.size == 0
+    if finite.size == 0:
+        return True
+
+    finite_fraction = float(finite.size) / float(field_2d.size)
+    if finite_fraction < 0.1 and np.allclose(finite, 0.0):
+        return True
+    return False
 
 
 def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_index: int, dpi: int) -> Path:
