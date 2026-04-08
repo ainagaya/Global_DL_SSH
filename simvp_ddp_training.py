@@ -79,6 +79,25 @@ def build_model(config):
     )
 
 
+def build_dataloader(dataset, batch_size, shuffle, num_workers, collate_fn, device, training_cfg):
+    loader_kwargs = {
+        "dataset": dataset,
+        "batch_size": int(batch_size),
+        "shuffle": bool(shuffle),
+        "num_workers": int(num_workers),
+        "collate_fn": collate_fn,
+        "pin_memory": bool(training_cfg.get("pin_memory", device.type == "cuda")),
+    }
+
+    if loader_kwargs["num_workers"] > 0:
+        loader_kwargs["persistent_workers"] = bool(training_cfg.get("persistent_workers", True))
+        prefetch_factor = training_cfg.get("prefetch_factor")
+        if prefetch_factor is not None:
+            loader_kwargs["prefetch_factor"] = int(prefetch_factor)
+
+    return DataLoader(**loader_kwargs)
+
+
 def evaluate(model, dataloader, device, use_amp, config):
     model.eval()
     total_loss = 0.0
@@ -106,6 +125,7 @@ def main():
     configure_logging(config)
     training_cfg = config["training"]
     tracker = MLflowTracker(config, stage="training")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     set_seed(int(training_cfg["seed"]))
     LOGGER.info("Loaded training config from %s", config["__config_path__"])
@@ -134,22 +154,25 @@ def main():
             step=0,
         )
 
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=int(training_cfg["batch_size"]),
-            shuffle=bool(training_cfg["shuffle"]),
-            num_workers=int(training_cfg["num_workers"]),
+        train_loader = build_dataloader(
+            dataset=train_dataset,
+            batch_size=training_cfg["batch_size"],
+            shuffle=training_cfg["shuffle"],
+            num_workers=training_cfg["num_workers"],
             collate_fn=collate_fn,
+            device=device,
+            training_cfg=training_cfg,
         )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=int(training_cfg["batch_size"]),
+        val_loader = build_dataloader(
+            dataset=val_dataset,
+            batch_size=training_cfg["batch_size"],
             shuffle=False,
-            num_workers=int(training_cfg["num_workers"]),
+            num_workers=training_cfg["num_workers"],
             collate_fn=collate_fn,
+            device=device,
+            training_cfg=training_cfg,
         )
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         use_amp = bool(training_cfg["amp"]) and device.type == "cuda"
         model = build_model(config).to(device)
         LOGGER.info("Using device=%s amp=%s", device, use_amp)
@@ -170,6 +193,7 @@ def main():
             LOGGER.info("Resumed checkpoint from %s at epoch=%s", checkpoint_path, start_epoch)
 
         epochs = int(training_cfg["epochs"])
+        validation_every_epochs = max(1, int(training_cfg.get("validation_every_epochs", 1)))
         LOGGER.info("Starting training for %s epochs", epochs - start_epoch)
         for epoch in range(start_epoch, epochs):
             model.train()
@@ -199,15 +223,21 @@ def main():
                 steps += 1
 
             train_loss = total_train_loss / max(steps, 1)
-            val_loss, skipped_val_batches = evaluate(model, val_loader, device, use_amp, config)
+            ran_validation = ((epoch - start_epoch + 1) % validation_every_epochs == 0) or (epoch == epochs - 1)
+            if ran_validation:
+                val_loss, skipped_val_batches = evaluate(model, val_loader, device, use_amp, config)
+            else:
+                val_loss = float("nan")
+                skipped_val_batches = 0
             logger.log(epoch, train_loss, val_loss)
             tracker.log_metrics(
                 {
                     "train_loss": train_loss,
-                    "val_loss": val_loss,
+                    "val_loss": val_loss if ran_validation else 0.0,
                     "skipped_train_batches": float(skipped_train_batches),
                     "skipped_val_batches": float(skipped_val_batches),
                     "completed_train_batches": float(steps),
+                    "ran_validation": float(ran_validation),
                 },
                 step=epoch,
             )
@@ -227,11 +257,11 @@ def main():
             if config.get("tracking", {}).get("mlflow", {}).get("log_checkpoints", True):
                 tracker.log_artifact(checkpoint_path, artifact_subdir="checkpoints")
             LOGGER.info(
-                "Epoch %s/%s finished: train_loss=%.6f val_loss=%.6f skipped_train_batches=%s skipped_val_batches=%s checkpoint=%s",
+                "Epoch %s/%s finished: train_loss=%.6f val_loss=%s skipped_train_batches=%s skipped_val_batches=%s checkpoint=%s",
                 epoch + 1,
                 epochs,
                 train_loss,
-                val_loss,
+                f"{val_loss:.6f}" if ran_validation else "skipped",
                 skipped_train_batches,
                 skipped_val_batches,
                 checkpoint_path,

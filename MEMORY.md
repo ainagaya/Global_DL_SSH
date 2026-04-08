@@ -364,6 +364,44 @@ Important behavior:
 - In the current pipeline, if one input variable is missing but another is present,
   the sample can still proceed and the missing channel is zero-filled for the model.
 - Only the plotting/export path preserves missingness explicitly.
+- A later query inspection on the user's environment showed:
+  - `file_index_summary: zero_match_queries=0 total_queries=12`
+  - `file_index_data_sources` included `l4_sst`
+- That means the SST issue is not caused by query generation or coarse file-index matching.
+- The remaining suspect stage is sample-level SST loading:
+  - matched `l4_sst` files may still produce empty windows for a specific bbox
+  - or loaded SST values may become entirely invalid during window extraction / sanitization
+
+
+### 14. Training throughput controls
+
+Decision:
+
+- Add lightweight training config controls for data-loader throughput and validation frequency.
+
+Why:
+
+- The user reported epochs taking longer than an hour.
+- In this pipeline, the dominant cost is often OceanTACO sample retrieval and preprocessing, not the forward pass itself.
+- Validation can also double effective epoch wall time because it reloads remote samples after every training epoch.
+
+Implementation:
+
+- `simvp_ddp_training.py` now supports:
+  - `training.pin_memory`
+  - `training.persistent_workers`
+  - `training.prefetch_factor`
+  - `training.validation_every_epochs`
+- Defaults:
+  - `pin_memory=True` on CUDA
+  - `persistent_workers=True` when `num_workers > 0`
+  - validation still defaults to every epoch unless configured otherwise
+
+Important behavior:
+
+- `num_workers: 0` still means fully serial loading.
+- With remote OceanTACO reads, `num_workers > 0` is usually the first thing to try.
+- Setting `validation_every_epochs` greater than `1` can cut epoch wall time substantially for slower remote datasets.
 
 
 ## Major code structure and behavior
