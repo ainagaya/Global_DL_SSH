@@ -389,8 +389,72 @@ def build_dataset(config: Dict[str, Any], split_name: str):
 
 
 def get_collate_fn():
-    _, collate_ocean_samples, _, _, _, _ = _import_oceantaco()
-    return collate_ocean_samples
+    def canonicalize_tensor(tensor: torch.Tensor | None) -> torch.Tensor | None:
+        if tensor is None:
+            return None
+        if tensor.ndim == 2:
+            return tensor.unsqueeze(0)
+        if tensor.ndim == 3:
+            return tensor
+        return tensor
+
+    def pad_tensor_to_shape(tensor: torch.Tensor, target_shape: list[int]) -> torch.Tensor:
+        if list(tensor.shape) == target_shape:
+            return tensor
+
+        pad = []
+        for dim_index in range(tensor.ndim - 1, -1, -1):
+            pad.extend([0, target_shape[dim_index] - tensor.shape[dim_index]])
+        return torch.nn.functional.pad(tensor, pad, value=0.0)
+
+    def collate_group(batch: list[dict[str, Any]], group_name: str) -> dict[str, torch.Tensor | None]:
+        variable_names = []
+        seen = set()
+        for sample in batch:
+            for variable_name in sample.get(group_name, {}).keys():
+                if variable_name not in seen:
+                    seen.add(variable_name)
+                    variable_names.append(variable_name)
+
+        collated = {}
+        for variable_name in variable_names:
+            tensors = [
+                canonicalize_tensor(
+                    None if sample[group_name].get(variable_name) is None else sample[group_name][variable_name].get("data")
+                )
+                for sample in batch
+            ]
+            present_tensors = [tensor for tensor in tensors if tensor is not None]
+            if not present_tensors:
+                collated[variable_name] = None
+                continue
+
+            reference = present_tensors[0]
+            target_shape = [max(tensor.shape[dim] for tensor in present_tensors) for dim in range(reference.ndim)]
+            padded_tensors = []
+            for tensor in tensors:
+                if tensor is None:
+                    padded_tensors.append(torch.zeros(target_shape, dtype=reference.dtype))
+                else:
+                    padded_tensors.append(pad_tensor_to_shape(tensor, target_shape))
+            collated[variable_name] = torch.stack(padded_tensors, dim=0)
+        return collated
+
+    def collate_preserving_alignment(batch: list[dict[str, Any]]) -> dict[str, Any]:
+        if not batch:
+            return {}
+
+        return {
+            "inputs": collate_group(batch, "inputs"),
+            "targets": collate_group(batch, "targets"),
+            "coords": batch[0]["coords"],
+            "metadata": {
+                "bboxes": [sample["metadata"]["bbox"] for sample in batch],
+                "time_ranges": [sample["metadata"]["time_range"] for sample in batch],
+            },
+        }
+
+    return collate_preserving_alignment
 
 
 def _convert_sst_to_celsius_if_needed(var: str, tensor: torch.Tensor) -> torch.Tensor:
@@ -514,12 +578,12 @@ def batch_input_fields(
     first_input = next((tensor for tensor in input_map.values() if tensor is not None), None)
     first_target = next((tensor for tensor in batch["targets"].values() if tensor is not None), None)
     batch_size = None
-    if first_input is not None:
+    if batch.get("metadata", {}).get("bboxes"):
+        batch_size = len(batch["metadata"]["bboxes"])
+    elif first_input is not None:
         batch_size = int(first_input.shape[0])
     elif first_target is not None:
         batch_size = int(first_target.shape[0])
-    elif batch.get("metadata", {}).get("bboxes"):
-        batch_size = len(batch["metadata"]["bboxes"])
 
     if batch_size is None:
         return None
@@ -549,12 +613,12 @@ def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any], allow_
     first_input = next((tensor for tensor in input_map.values() if tensor is not None), None)
     first_target = next((tensor for tensor in batch["targets"].values() if tensor is not None), None)
     batch_size = None
-    if first_input is not None:
+    if batch.get("metadata", {}).get("bboxes"):
+        batch_size = len(batch["metadata"]["bboxes"])
+    elif first_input is not None:
         batch_size = int(first_input.shape[0])
     elif first_target is not None:
         batch_size = int(first_target.shape[0])
-    elif batch.get("metadata", {}).get("bboxes"):
-        batch_size = len(batch["metadata"]["bboxes"])
 
     if batch_size is None:
         return None, None

@@ -1086,6 +1086,13 @@ Smoke test:
   batched shapes expected by `batch_input_fields()`. Prediction export now
   reshapes raw sample tensors into a true single-sample batch before applying
   the shared preprocessing path.
+- After enabling larger batch sizes / worker optimizations, another batching bug
+  surfaced: OceanTACO’s upstream `collate_ocean_samples()` drops `None` entries
+  before stacking, so mixed-missing batches can produce different batch sizes
+  per variable (for example one input tensor with batch dimension 1 and another
+  with batch dimension 2). The project now uses a custom collate function that
+  preserves batch alignment by zero-filling only the missing sample slots and
+  normalizing 2D sample tensors into `(1, H, W)` before stacking.
 
 
 ## Documentation changes made

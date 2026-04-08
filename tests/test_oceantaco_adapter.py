@@ -13,6 +13,7 @@ from src.oceantaco import (
     batch_input_fields,
     batch_to_model_tensors,
     build_queries,
+    get_collate_fn,
     prediction_records,
 )
 
@@ -86,6 +87,40 @@ def test_batch_to_model_tensors_can_zero_fill_empty_inputs_for_prediction(base_c
     assert inputs.shape == (1, 5, 2, 128, 128)
     assert torch.count_nonzero(inputs) == 0
     assert targets.shape == (1, 5, 1, 128, 128)
+
+
+def test_collate_fn_preserves_batch_alignment_when_some_samples_miss_an_input(base_config):
+    collate_fn = get_collate_fn()
+    batch = collate_fn(
+        [
+            {
+                "inputs": {
+                    "l3_ssh": {"data": torch.ones(96, 96)},
+                    "l4_sst": {"data": torch.full((96, 96), 25.0)},
+                },
+                "targets": {"l3_swot": {"data": torch.ones(96, 96)}},
+                "coords": {},
+                "metadata": {"bbox": (0.0, 1.0, 2.0, 3.0), "time_range": ("2025-04-01", "2025-04-05")},
+            },
+            {
+                "inputs": {
+                    "l3_ssh": None,
+                    "l4_sst": {"data": torch.full((96, 96), 26.0)},
+                },
+                "targets": {"l3_swot": {"data": torch.ones(96, 96)}},
+                "coords": {},
+                "metadata": {"bbox": (1.0, 2.0, 3.0, 4.0), "time_range": ("2025-04-02", "2025-04-06")},
+            },
+        ]
+    )
+
+    inputs, targets = batch_to_model_tensors(batch, base_config, allow_empty_inputs=True)
+
+    assert batch["inputs"]["l3_ssh"].shape == (2, 1, 96, 96)
+    assert batch["inputs"]["l4_sst"].shape == (2, 1, 96, 96)
+    assert inputs.shape == (2, 5, 2, 96, 96)
+    assert targets.shape == (2, 5, 1, 96, 96)
+    assert torch.count_nonzero(batch["inputs"]["l3_ssh"][1]) == 0
 
 
 def test_batch_input_fields_can_return_raw_unnormalised_inputs(base_config):
