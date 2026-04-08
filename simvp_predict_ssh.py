@@ -195,6 +195,7 @@ def main():
                 inputs = inputs[valid_target_mask]
                 targets = targets[valid_target_mask]
                 records = [record for record, keep in zip(records, valid_target_mask.tolist()) if keep]
+                inputs_cpu = inputs.cpu().numpy()
                 inputs = inputs.to(device)
                 predictions = model(inputs).cpu().numpy()
                 targets = targets.numpy()
@@ -212,6 +213,8 @@ def main():
                         save_path,
                         prediction=predictions[sample_index],
                         target=targets[sample_index],
+                        input_l3_ssh=inputs_cpu[sample_index, :, 0],
+                        input_l4_sst=inputs_cpu[sample_index, :, 1] if inputs_cpu.shape[2] > 1 else None,
                         bbox=np.array(record["bbox"], dtype=np.float32),
                         time_range=np.array(record["time_range"]),
                         target_date=target_date,

@@ -13,6 +13,8 @@ import numpy as np
 #
 # - `prediction`: model output
 # - `target`: reference field
+# - `input_l3_ssh`: SSH input field used by the model for this sample
+# - `input_l4_sst`: SST input field used by the model for this sample
 # - `bbox`: [lon_min, lon_max, lat_min, lat_max]
 # - `time_range`: [start_date, end_date]
 # - `target_date`: date associated with the selected target index
@@ -120,6 +122,13 @@ def compute_common_limits(prediction_2d: np.ndarray, target_2d: np.ndarray) -> t
     return float(finite.min()), float(finite.max())
 
 
+def compute_limits(field_2d: np.ndarray) -> tuple[float, float]:
+    finite = field_2d[np.isfinite(field_2d)]
+    if finite.size == 0:
+        return -1.0, 1.0
+    return float(finite.min()), float(finite.max())
+
+
 def compute_symmetric_limit(diff_2d: np.ndarray) -> float:
     finite = diff_2d[np.isfinite(diff_2d)]
     if finite.size == 0:
@@ -144,6 +153,8 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
     with np.load(npz_path, allow_pickle=True) as payload:
         prediction = np.asarray(payload["prediction"])
         target = np.asarray(payload["target"])
+        input_l3_ssh = np.asarray(payload["input_l3_ssh"]) if "input_l3_ssh" in payload else None
+        input_l4_sst = np.asarray(payload["input_l4_sst"]) if "input_l4_sst" in payload else None
         bbox = np.asarray(payload["bbox"]) if "bbox" in payload else None
         time_range = np.asarray(payload["time_range"]) if "time_range" in payload else None
         target_date = str(payload["target_date"]) if "target_date" in payload else None
@@ -151,9 +162,17 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
     prediction_2d = select_2d_slice(prediction, time_index=time_index, channel_index=channel_index)
     target_2d = select_2d_slice(target, time_index=time_index, channel_index=channel_index)
     diff_2d = prediction_2d - target_2d
+    input_l3_ssh_2d = (
+        select_2d_slice(input_l3_ssh, time_index=time_index, channel_index=channel_index) if input_l3_ssh is not None else None
+    )
+    input_l4_sst_2d = (
+        select_2d_slice(input_l4_sst, time_index=time_index, channel_index=channel_index) if input_l4_sst is not None else None
+    )
 
     value_min, value_max = compute_common_limits(prediction_2d, target_2d)
     diff_limit = compute_symmetric_limit(diff_2d)
+    ssh_min, ssh_max = compute_limits(input_l3_ssh_2d) if input_l3_ssh_2d is not None else (None, None)
+    sst_min, sst_max = compute_limits(input_l4_sst_2d) if input_l4_sst_2d is not None else (None, None)
 
     # If bbox is available, use it as the image extent so the axes are displayed
     # in geographic coordinates rather than raw pixel coordinates.
@@ -162,43 +181,33 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
         lon_min, lon_max, lat_min, lat_max = [float(value) for value in bbox]
         extent = [lon_min, lon_max, lat_min, lat_max]
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5), constrained_layout=True)
+    panel_specs = [
+        ("Prediction", prediction_2d, "viridis", value_min, value_max),
+        ("Target", target_2d, "viridis", value_min, value_max),
+        ("Prediction - Target", diff_2d, "coolwarm", -diff_limit, diff_limit),
+    ]
+    if input_l3_ssh_2d is not None:
+        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", ssh_min, ssh_max))
+    if input_l4_sst_2d is not None:
+        panel_specs.append(("Input L4 SST", input_l4_sst_2d, "inferno", sst_min, sst_max))
 
-    image_pred = axes[0].imshow(
-        prediction_2d,
-        origin="lower",
-        cmap="viridis",
-        vmin=value_min,
-        vmax=value_max,
-        extent=extent,
-        aspect="auto",
-    )
-    axes[0].set_title("Prediction")
-    fig.colorbar(image_pred, ax=axes[0], shrink=0.85)
+    fig_width = 5 * len(panel_specs)
+    fig, axes = plt.subplots(1, len(panel_specs), figsize=(fig_width, 5), constrained_layout=True)
+    if len(panel_specs) == 1:
+        axes = [axes]
 
-    image_target = axes[1].imshow(
-        target_2d,
-        origin="lower",
-        cmap="viridis",
-        vmin=value_min,
-        vmax=value_max,
-        extent=extent,
-        aspect="auto",
-    )
-    axes[1].set_title("Target")
-    fig.colorbar(image_target, ax=axes[1], shrink=0.85)
-
-    image_diff = axes[2].imshow(
-        diff_2d,
-        origin="lower",
-        cmap="coolwarm",
-        vmin=-diff_limit,
-        vmax=diff_limit,
-        extent=extent,
-        aspect="auto",
-    )
-    axes[2].set_title("Prediction - Target")
-    fig.colorbar(image_diff, ax=axes[2], shrink=0.85)
+    for axis, (title, field_2d, cmap, vmin, vmax) in zip(axes, panel_specs):
+        image = axis.imshow(
+            field_2d,
+            origin="lower",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            extent=extent,
+            aspect="auto",
+        )
+        axis.set_title(title)
+        fig.colorbar(image, ax=axis, shrink=0.85)
 
     for axis in axes:
         axis.set_xlabel("Longitude" if extent is not None else "X")
