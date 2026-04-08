@@ -422,6 +422,25 @@ def _preprocess_tensor(tensor: torch.Tensor, source_cfg: Dict[str, Any]) -> torc
     return output
 
 
+def _preprocess_tensor_for_plot(
+    tensor: torch.Tensor,
+    source_cfg: Dict[str, Any],
+) -> torch.Tensor:
+    output = tensor.clone()
+    finite_mask = torch.isfinite(output)
+    output = torch.where(finite_mask, output, torch.full_like(output, torch.nan))
+    output = _convert_sst_to_celsius_if_needed(source_cfg["key"], output)
+
+    norm_cfg = source_cfg.get("normalize")
+    if not norm_cfg:
+        return output
+
+    min_valid = norm_cfg.get("min_valid")
+    if min_valid is not None:
+        output = torch.where(output < float(min_valid), torch.full_like(output, torch.nan), output)
+    return output
+
+
 def _normalise_tensor(tensor: torch.Tensor, source_cfg: Dict[str, Any]) -> torch.Tensor:
     output = _preprocess_tensor(tensor, source_cfg)
     norm_cfg = source_cfg.get("normalize")
@@ -450,9 +469,11 @@ def _prepare_variable_tensor(
     width: int,
     source_cfg: Dict[str, Any],
     normalise: bool = True,
+    preserve_missing: bool = False,
 ) -> torch.Tensor:
     if tensor is None:
-        return torch.zeros((batch_size, sequence_length, height, width), dtype=torch.float32)
+        fill_value = torch.nan if preserve_missing else 0.0
+        return torch.full((batch_size, sequence_length, height, width), fill_value=fill_value, dtype=torch.float32)
 
     output = tensor.float()
     if output.ndim == 3:
@@ -473,10 +494,17 @@ def _prepare_variable_tensor(
 
     if normalise:
         return _normalise_tensor(output, source_cfg)
+    if preserve_missing:
+        return _preprocess_tensor_for_plot(output, source_cfg)
     return _preprocess_tensor(output, source_cfg)
 
 
-def batch_input_fields(batch: Dict[str, Any], config: Dict[str, Any], normalise: bool = True) -> Dict[str, torch.Tensor] | None:
+def batch_input_fields(
+    batch: Dict[str, Any],
+    config: Dict[str, Any],
+    normalise: bool = True,
+    preserve_missing: bool = False,
+) -> Dict[str, torch.Tensor] | None:
     grid_cfg = config["data"]["grid"]
     sequence_length = int(config["data"]["sequence_length"])
     height = int(grid_cfg["height"])
@@ -505,6 +533,7 @@ def batch_input_fields(batch: Dict[str, Any], config: Dict[str, Any], normalise:
             width,
             source_cfg,
             normalise=normalise,
+            preserve_missing=preserve_missing,
         )
         for source_cfg in config["data"]["inputs"]
     }

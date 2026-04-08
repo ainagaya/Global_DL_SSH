@@ -147,6 +147,24 @@ def test_batch_input_fields_preserve_celsius_sst_without_double_conversion(base_
     assert torch.all(raw_inputs["l4_sst"] == 25.0)
 
 
+def test_batch_input_fields_can_preserve_missing_inputs_for_plotting(base_config):
+    batch = {
+        "inputs": {
+            "l3_ssh": torch.ones(1, 2, 2),
+            "l4_sst": None,
+        },
+        "targets": {
+            "l3_swot": torch.ones(1, 2, 2),
+        },
+        "metadata": {"bboxes": [], "time_ranges": []},
+    }
+
+    raw_inputs = batch_input_fields(batch, base_config, normalise=False, preserve_missing=True)
+
+    assert raw_inputs is not None
+    assert torch.isnan(raw_inputs["l4_sst"]).all()
+
+
 def test_prediction_records_uses_target_index(base_config):
     batch = {
         "metadata": {

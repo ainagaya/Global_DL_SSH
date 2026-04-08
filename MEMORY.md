@@ -32,6 +32,12 @@ Main configs:
 - `configs/oceantaco_gulf_stream.yaml`
 
 
+## Working preferences
+
+- Always read `MEMORY.md` before making substantial changes so the latest repo context and decisions are in view.
+- Always update `MEMORY.md` after meaningful workflow, pipeline, debugging, or behavioral changes so future sessions inherit the current state.
+
+
 ## High-level decisions taken
 
 ### 1. Move to OceanTACO package API
@@ -319,6 +325,45 @@ Design choice:
   - `[T, H, W]`
   - `[T, C, H, W]`
 - If bbox is present in the `.npz`, it is used as the longitude/latitude extent in plots.
+
+
+### 13. SST pipeline and missing-input debugging
+
+Decision:
+
+- Keep model-facing tensors finite for training and inference.
+- Distinguish missing SST from observed SST in prediction artifacts and plots.
+- Make SST preprocessing consistent across model input preparation and plotting.
+
+Why:
+
+- The user reported contradictory SST behavior across prediction export and plotting:
+  - constant zero SST panels
+  - negative SST values in plots
+- The root causes were:
+  - missing inputs being serialized as zeros for plotting
+  - SST unit conversion and sanitization happening inconsistently across paths
+
+Implementation:
+
+- Model-facing input tensors remain finite:
+  - missing variables are zero-filled before entering the model
+  - this avoids `NaN` values during training and inference
+- Plot/export input tensors now have a separate preprocessing path:
+  - SST is converted to Celsius if the values look Kelvin-like
+  - invalid SST values below `min_valid` are marked missing for plots
+  - missing plot/export inputs are preserved as `NaN`, not fabricated zeros
+- Prediction artifacts now store input presence flags:
+  - `input_l3_ssh_present`
+  - `input_l4_sst_present`
+- Plotting labels missing panels as `Missing / invalid` instead of showing a fake constant field
+
+Important behavior:
+
+- Retrieval can still return `None` for a variable.
+- In the current pipeline, if one input variable is missing but another is present,
+  the sample can still proceed and the missing channel is zero-filled for the model.
+- Only the plotting/export path preserves missingness explicitly.
 
 
 ## Major code structure and behavior

@@ -159,7 +159,9 @@ def main():
         allow_empty_inputs = bool(prediction_cfg.get("allow_empty_inputs", True))
         with torch.no_grad():
             for batch_index, batch in enumerate(dataloader):
-                has_any_inputs = any(tensor is not None for tensor in batch["inputs"].values())
+                present_inputs = [name for name, tensor in batch["inputs"].items() if tensor is not None]
+                missing_inputs = [name for name, tensor in batch["inputs"].items() if tensor is None]
+                has_any_inputs = bool(present_inputs)
                 inputs, targets = batch_to_model_tensors(batch, config, allow_empty_inputs=allow_empty_inputs)
                 if inputs is None:
                     skipped_batches += 1
@@ -172,9 +174,16 @@ def main():
                         batch_index + 1,
                         len(dataloader),
                     )
+                elif missing_inputs:
+                    LOGGER.warning(
+                        "Prediction batch %s/%s is missing inputs %s. The model will receive zero-filled channels for them.",
+                        batch_index + 1,
+                        len(dataloader),
+                        missing_inputs,
+                    )
                 records = prediction_records(batch, config)
                 valid_target_mask = nonempty_target_mask(targets)
-                raw_input_fields = batch_input_fields(batch, config, normalise=False)
+                raw_input_fields = batch_input_fields(batch, config, normalise=False, preserve_missing=True)
                 skipped_in_batch = int((~valid_target_mask).sum().item())
                 if skipped_in_batch:
                     skipped_empty_target_samples += skipped_in_batch
@@ -220,6 +229,8 @@ def main():
                         target=targets[sample_index],
                         input_l3_ssh=raw_l3_ssh_np[sample_index] if raw_l3_ssh_np is not None else inputs_cpu[sample_index, :, 0],
                         input_l4_sst=raw_l4_sst_np[sample_index] if raw_l4_sst_np is not None else None,
+                        input_l3_ssh_present="l3_ssh" in present_inputs,
+                        input_l4_sst_present="l4_sst" in present_inputs,
                         bbox=np.array(record["bbox"], dtype=np.float32),
                         time_range=np.array(record["time_range"]),
                         target_date=target_date,

@@ -149,12 +149,23 @@ def format_title(npz_path: Path, bbox: np.ndarray | None, time_range: np.ndarray
     return "\n".join(parts)
 
 
+def is_missing_field(field_2d: np.ndarray | None, present_flag: bool | None = None) -> bool:
+    if present_flag is False:
+        return True
+    if field_2d is None:
+        return True
+    finite = field_2d[np.isfinite(field_2d)]
+    return finite.size == 0
+
+
 def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_index: int, dpi: int) -> Path:
     with np.load(npz_path, allow_pickle=True) as payload:
         prediction = np.asarray(payload["prediction"])
         target = np.asarray(payload["target"])
         input_l3_ssh = np.asarray(payload["input_l3_ssh"]) if "input_l3_ssh" in payload else None
         input_l4_sst = np.asarray(payload["input_l4_sst"]) if "input_l4_sst" in payload else None
+        input_l3_ssh_present = bool(payload["input_l3_ssh_present"]) if "input_l3_ssh_present" in payload else None
+        input_l4_sst_present = bool(payload["input_l4_sst_present"]) if "input_l4_sst_present" in payload else None
         bbox = np.asarray(payload["bbox"]) if "bbox" in payload else None
         time_range = np.asarray(payload["time_range"]) if "time_range" in payload else None
         target_date = str(payload["target_date"]) if "target_date" in payload else None
@@ -173,6 +184,8 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
     diff_limit = compute_symmetric_limit(diff_2d)
     ssh_min, ssh_max = compute_limits(input_l3_ssh_2d) if input_l3_ssh_2d is not None else (None, None)
     sst_min, sst_max = compute_limits(input_l4_sst_2d) if input_l4_sst_2d is not None else (None, None)
+    ssh_missing = is_missing_field(input_l3_ssh_2d, input_l3_ssh_present)
+    sst_missing = is_missing_field(input_l4_sst_2d, input_l4_sst_present)
 
     # If bbox is available, use it as the image extent so the axes are displayed
     # in geographic coordinates rather than raw pixel coordinates.
@@ -187,27 +200,47 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
         ("Prediction - Target", diff_2d, "coolwarm", -diff_limit, diff_limit),
     ]
     if input_l3_ssh_2d is not None:
-        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", ssh_min, ssh_max))
+        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", ssh_min, ssh_max, ssh_missing))
     if input_l4_sst_2d is not None:
-        panel_specs.append(("Input L4 SST", input_l4_sst_2d, "inferno", sst_min, sst_max))
+        panel_specs.append(("Input L4 SST", input_l4_sst_2d, "inferno", sst_min, sst_max, sst_missing))
 
     fig_width = 5 * len(panel_specs)
     fig, axes = plt.subplots(1, len(panel_specs), figsize=(fig_width, 5), constrained_layout=True)
     if len(panel_specs) == 1:
         axes = [axes]
 
-    for axis, (title, field_2d, cmap, vmin, vmax) in zip(axes, panel_specs):
+    normalized_specs = []
+    for spec in panel_specs[:3]:
+        title, field_2d, cmap, vmin, vmax = spec
+        normalized_specs.append((title, field_2d, cmap, vmin, vmax, False))
+    normalized_specs.extend(panel_specs[3:])
+
+    for axis, (title, field_2d, cmap, vmin, vmax, missing) in zip(axes, normalized_specs):
+        display_field = np.zeros_like(field_2d) if missing else field_2d
         image = axis.imshow(
-            field_2d,
+            display_field,
             origin="lower",
-            cmap=cmap,
+            cmap="Greys" if missing else cmap,
             vmin=vmin,
             vmax=vmax,
             extent=extent,
             aspect="auto",
         )
-        axis.set_title(title)
-        fig.colorbar(image, ax=axis, shrink=0.85)
+        axis.set_title(f"{title} (missing)" if missing else title)
+        if missing:
+            axis.text(
+                0.5,
+                0.5,
+                "Missing / invalid",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+                fontsize=10,
+                color="black",
+                bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+            )
+        else:
+            fig.colorbar(image, ax=axis, shrink=0.85)
 
     for axis in axes:
         axis.set_xlabel("Longitude" if extent is not None else "X")
