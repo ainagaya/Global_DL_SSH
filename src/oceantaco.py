@@ -415,6 +415,7 @@ def _prepare_variable_tensor(
     height: int,
     width: int,
     source_cfg: Dict[str, Any],
+    normalise: bool = True,
 ) -> torch.Tensor:
     if tensor is None:
         return torch.zeros((batch_size, sequence_length, height, width), dtype=torch.float32)
@@ -436,7 +437,43 @@ def _prepare_variable_tensor(
     elif current_length > sequence_length:
         output = output[:, :sequence_length, :, :]
 
-    return _normalise_tensor(output, source_cfg)
+    if normalise:
+        return _normalise_tensor(output, source_cfg)
+    return output
+
+
+def batch_input_fields(batch: Dict[str, Any], config: Dict[str, Any], normalise: bool = True) -> Dict[str, torch.Tensor] | None:
+    grid_cfg = config["data"]["grid"]
+    sequence_length = int(config["data"]["sequence_length"])
+    height = int(grid_cfg["height"])
+    width = int(grid_cfg["width"])
+
+    input_map = batch["inputs"]
+    first_input = next((tensor for tensor in input_map.values() if tensor is not None), None)
+    first_target = next((tensor for tensor in batch["targets"].values() if tensor is not None), None)
+    batch_size = None
+    if first_input is not None:
+        batch_size = int(first_input.shape[0])
+    elif first_target is not None:
+        batch_size = int(first_target.shape[0])
+    elif batch.get("metadata", {}).get("bboxes"):
+        batch_size = len(batch["metadata"]["bboxes"])
+
+    if batch_size is None:
+        return None
+
+    return {
+        source_cfg["key"]: _prepare_variable_tensor(
+            input_map.get(source_cfg["key"]),
+            batch_size,
+            sequence_length,
+            height,
+            width,
+            source_cfg,
+            normalise=normalise,
+        )
+        for source_cfg in config["data"]["inputs"]
+    }
 
 
 def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any], allow_empty_inputs: bool = False):
@@ -461,10 +498,10 @@ def batch_to_model_tensors(batch: Dict[str, Any], config: Dict[str, Any], allow_
     if first_input is None and not allow_empty_inputs:
         return None, None
 
-    input_tensors = [
-        _prepare_variable_tensor(input_map.get(source_cfg["key"]), batch_size, sequence_length, height, width, source_cfg)
-        for source_cfg in config["data"]["inputs"]
-    ]
+    prepared_inputs = batch_input_fields(batch, config, normalise=True)
+    if prepared_inputs is None:
+        return None, None
+    input_tensors = [prepared_inputs[source_cfg["key"]] for source_cfg in config["data"]["inputs"]]
     target_tensors = [
         _prepare_variable_tensor(batch["targets"].get(source_cfg["key"]), batch_size, sequence_length, height, width, source_cfg)
         for source_cfg in config["data"]["targets"]

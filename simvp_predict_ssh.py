@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from src.config_utils import ensure_dir, load_config
 from src.logging_utils import configure_logging
 from src.mlflow_utils import MLflowTracker
-from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn, prediction_records
+from src.oceantaco import batch_input_fields, batch_to_model_tensors, build_dataset, get_collate_fn, prediction_records
 from src.simvp_model import SimVP_Model_no_skip_configurable
 
 LOGGER = logging.getLogger(__name__)
@@ -174,6 +174,7 @@ def main():
                     )
                 records = prediction_records(batch, config)
                 valid_target_mask = nonempty_target_mask(targets)
+                raw_input_fields = batch_input_fields(batch, config, normalise=False)
                 skipped_in_batch = int((~valid_target_mask).sum().item())
                 if skipped_in_batch:
                     skipped_empty_target_samples += skipped_in_batch
@@ -196,6 +197,10 @@ def main():
                 targets = targets[valid_target_mask]
                 records = [record for record, keep in zip(records, valid_target_mask.tolist()) if keep]
                 inputs_cpu = inputs.cpu().numpy()
+                raw_l3_ssh = None if raw_input_fields is None else raw_input_fields.get("l3_ssh")
+                raw_l4_sst = None if raw_input_fields is None else raw_input_fields.get("l4_sst")
+                raw_l3_ssh_np = None if raw_l3_ssh is None else raw_l3_ssh[valid_target_mask].cpu().numpy()
+                raw_l4_sst_np = None if raw_l4_sst is None else raw_l4_sst[valid_target_mask].cpu().numpy()
                 inputs = inputs.to(device)
                 predictions = model(inputs).cpu().numpy()
                 targets = targets.numpy()
@@ -213,8 +218,8 @@ def main():
                         save_path,
                         prediction=predictions[sample_index],
                         target=targets[sample_index],
-                        input_l3_ssh=inputs_cpu[sample_index, :, 0],
-                        input_l4_sst=inputs_cpu[sample_index, :, 1] if inputs_cpu.shape[2] > 1 else None,
+                        input_l3_ssh=raw_l3_ssh_np[sample_index] if raw_l3_ssh_np is not None else inputs_cpu[sample_index, :, 0],
+                        input_l4_sst=raw_l4_sst_np[sample_index] if raw_l4_sst_np is not None else None,
                         bbox=np.array(record["bbox"], dtype=np.float32),
                         time_range=np.array(record["time_range"]),
                         target_date=target_date,

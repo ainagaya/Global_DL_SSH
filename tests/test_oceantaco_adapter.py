@@ -10,6 +10,7 @@ from src.oceantaco import (
     _build_patched_dataset_class,
     _resolve_bbox,
     _split_region_bboxes,
+    batch_input_fields,
     batch_to_model_tensors,
     build_queries,
     prediction_records,
@@ -85,6 +86,26 @@ def test_batch_to_model_tensors_can_zero_fill_empty_inputs_for_prediction(base_c
     assert inputs.shape == (1, 5, 2, 128, 128)
     assert torch.count_nonzero(inputs) == 0
     assert targets.shape == (1, 5, 1, 128, 128)
+
+
+def test_batch_input_fields_can_return_raw_unnormalised_inputs(base_config):
+    batch = {
+        "inputs": {
+            "l3_ssh": torch.ones(1, 128, 128),
+            "l4_sst": torch.full((1, 128, 128), 25.0),
+        },
+        "targets": {
+            "l3_swot": torch.ones(1, 128, 128),
+        },
+        "metadata": {"bboxes": [], "time_ranges": []},
+    }
+
+    raw_inputs = batch_input_fields(batch, base_config, normalise=False)
+    normalised_inputs = batch_input_fields(batch, base_config, normalise=True)
+
+    assert raw_inputs is not None
+    assert torch.all(raw_inputs["l4_sst"] == 25.0)
+    assert not torch.all(normalised_inputs["l4_sst"] == 25.0)
 
 
 def test_prediction_records_uses_target_index(base_config):
