@@ -103,7 +103,11 @@ model:
 
 training:
   batch_size: 2
-  num_workers: 0
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  validation_every_epochs: 3
   learning_rate: 0.001
   epochs: 15
   amp: true
