@@ -10,6 +10,7 @@ from plot_predictions import plot_single_file
 def test_plot_single_file_supports_input_panels(tmp_path):
     npz_path = tmp_path / "sample.npz"
     output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     prediction = np.ones((3, 1, 8, 8), dtype=np.float32)
     target = np.zeros((3, 1, 8, 8), dtype=np.float32)

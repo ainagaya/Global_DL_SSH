@@ -36,6 +36,7 @@ Main configs:
 
 - Always read `MEMORY.md` before making substantial changes so the latest repo context and decisions are in view.
 - Always update `MEMORY.md` after meaningful workflow, pipeline, debugging, or behavioral changes so future sessions inherit the current state.
+- Prefer using the virtual environment at `~/envs/general` for repo commands and verification because it has the needed project dependencies.
 
 
 ## High-level decisions taken
@@ -1125,6 +1126,19 @@ Smoke test:
   fine. `src/oceantaco.py` now provides `denormalise_tensor(...)`, and
   `simvp_predict_ssh.py` denormalizes saved predictions and targets back to
   physical units before writing `.npz` artifacts.
+- A later artifact inspection using `~/envs/general` showed that a downloaded
+  `predictions/` directory can still contain a mixture of generations. In one
+  case, the current `predictions/queries/test.parquet` only described 3x3 degree
+  bboxes, but `predictions/` also contained older 5x5 bbox `.npz` files and was
+  missing some expected current-query outputs. That explained why some `.npz`
+  files were correctly denormalized while others still showed old normalized
+  target scales. The practical fix is to clear `predictions/*.npz` (or write to
+  a new output directory) before rerunning inference so stale files do not get
+  mixed with fresh outputs.
+- A later plotting preference change: `plot_predictions.py` now uses the same
+  `vmin`/`vmax` for the `Input L3 SSH` panel as for `Prediction` and `Target`,
+  so those three SSH-related panels are directly comparable on the same color
+  scale. `Input L4 SST` keeps its own scale.
 
 
 ## Documentation changes made

@@ -188,7 +188,6 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
 
     value_min, value_max = compute_common_limits(prediction_2d, target_2d)
     diff_limit = compute_symmetric_limit(diff_2d)
-    ssh_min, ssh_max = compute_limits(input_l3_ssh_2d) if input_l3_ssh_2d is not None else (None, None)
     sst_min, sst_max = compute_limits(input_l4_sst_2d) if input_l4_sst_2d is not None else (None, None)
     ssh_missing = is_missing_field(input_l3_ssh_2d, input_l3_ssh_present)
     sst_missing = is_missing_field(input_l4_sst_2d, input_l4_sst_present)
@@ -206,7 +205,7 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
         ("Prediction - Target", diff_2d, "coolwarm", -diff_limit, diff_limit),
     ]
     if input_l3_ssh_2d is not None:
-        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", ssh_min, ssh_max, ssh_missing))
+        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", value_min, value_max, ssh_missing))
     if input_l4_sst_2d is not None:
         panel_specs.append(("Input L4 SST", input_l4_sst_2d, "inferno", sst_min, sst_max, sst_missing))
 
