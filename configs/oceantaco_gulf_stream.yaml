@@ -32,6 +32,7 @@ regions:
 queries:
   patch_size:
     value: 3.0
+    # value: 5
     unit: deg
   land_mask_path:
   max_land_fraction: 0.5
@@ -73,6 +74,7 @@ splits:
     start_date: 2025-01-15
     end_date: 2025-03-15
     n_queries: 64
+    # n_queries: 1
     regions:
       - gulf_stream
   validation:
@@ -103,9 +105,9 @@ model:
 
 training:
   batch_size: 2
-  num_workers: 4
+  num_workers: 0
   pin_memory: true
-  persistent_workers: true
+  # persistent_workers: true
   prefetch_factor: 2
   validation_every_epochs: 3
   learning_rate: 0.001
