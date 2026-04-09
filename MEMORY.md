@@ -1093,6 +1093,19 @@ Smoke test:
   with batch dimension 2). The project now uses a custom collate function that
   preserves batch alignment by zero-filling only the missing sample slots and
   normalizing 2D sample tensors into `(1, H, W)` before stacking.
+- Artifact inspection of downloaded prediction files later showed that the
+  current `plot_predictions.py` behavior is correct: when `.npz` files contain
+  `input_l4_sst_present=False`, the SST panel is rendered as
+  `Input L4 SST (missing)`. The downloaded `.npz` files themselves still held a
+  degenerate SST artifact (`1900/46080` finite pixels, all zero, in a bottom/right
+  border pattern), which points to inference export still producing the old
+  padded-batch artifact rather than the true SST field.
+- Another later training failure came from remote streamed downloads breaking
+  mid-transfer with `requests.exceptions.ChunkedEncodingError` wrapped around
+  `IncompleteRead`. The retry classifier in `src/oceantaco.py` was extended to
+  inspect nested exception chains and treat `ChunkedEncodingError`,
+  `ProtocolError`, `IncompleteRead`, and related "connection broken" messages as
+  transient so those OceanTACO loads are retried instead of crashing training.
 
 
 ## Documentation changes made

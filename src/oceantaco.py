@@ -50,23 +50,51 @@ def _extract_status_code(exc: Exception) -> int | None:
     return None
 
 
-def _is_transient_data_error(exc: Exception, retry_status_codes: tuple[int, ...]) -> bool:
-    status_code = _extract_status_code(exc)
-    if status_code is not None:
-        return status_code in retry_status_codes
+def _iter_exception_chain(exc: Exception):
+    current = exc
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
 
-    message = str(exc).lower()
+
+def _is_transient_data_error(exc: Exception, retry_status_codes: tuple[int, ...]) -> bool:
+    for current_exc in _iter_exception_chain(exc):
+        status_code = _extract_status_code(current_exc)
+        if status_code is not None and status_code in retry_status_codes:
+            return True
+
+    message = " | ".join(str(current_exc).lower() for current_exc in _iter_exception_chain(exc))
+    exception_type_names = {type(current_exc).__name__.lower() for current_exc in _iter_exception_chain(exc)}
     transient_markers = (
         "timed out",
         "timeout",
         "temporary failure",
+        "temporary unavailable",
         "connection reset",
         "connection aborted",
         "connection refused",
+        "connection broken",
         "server disconnected",
         "remote end closed connection",
+        "incompleteread",
+        "chunkedencodingerror",
+        "protocolerror",
+        "connection broken:",
+        "broken pipe",
     )
-    return any(marker in message for marker in transient_markers)
+    transient_exception_names = {
+        "chunkedencodingerror",
+        "protocolerror",
+        "incompleteread",
+        "readtimeout",
+        "connecttimeout",
+        "connectionerror",
+    }
+    return any(marker in message for marker in transient_markers) or bool(
+        exception_type_names & transient_exception_names
+    )
 
 
 def _build_patched_dataset_class(base_cls, ocean_dataset_module):
