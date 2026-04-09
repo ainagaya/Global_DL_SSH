@@ -8,12 +8,14 @@ from typing import Any, Dict, List
 import pandas as pd
 import torch
 
-from src.config_utils import ensure_dir, get_split_config
+from src.config_utils import ensure_dir, get_split_config, resolve_path
 
 
 DEFAULT_GLOBAL_BBOX = (-180.0, 180.0, -60.0, 60.0)
 LOGGER = logging.getLogger(__name__)
 
+DEFAULT_HF_REPO_ID = "nilsleh/OceanTACO"
+DEFAULT_HF_REVISION = "main"
 DEFAULT_RETRY_ATTEMPTS = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_MULTIPLIER = 2.0
@@ -32,6 +34,68 @@ def _import_oceantaco():
         ) from exc
 
     return OceanTACODataset, collate_ocean_samples, PatchSize, QueryGenerator, HF_DEFAULT_URL, ocean_dataset_module
+
+
+def get_oceantaco_repo_id(config: Dict[str, Any]) -> str:
+    return str(config.get("oceantaco", {}).get("hf_repo_id", DEFAULT_HF_REPO_ID))
+
+
+def get_oceantaco_revision(config: Dict[str, Any]) -> str:
+    return str(config.get("oceantaco", {}).get("revision", DEFAULT_HF_REVISION))
+
+
+def _looks_like_remote_taco_path(path_value: str | Path | None) -> bool:
+    if path_value in (None, ""):
+        return False
+    text = str(path_value)
+    return "://" in text or text.startswith("hf://") or text.startswith("/vsicurl/")
+
+
+def get_configured_local_oceantaco_path(config: Dict[str, Any]) -> Path | None:
+    oceantaco_cfg = config.get("oceantaco", {})
+
+    for key in ("download_path", "taco_path"):
+        path_value = oceantaco_cfg.get(key)
+        if path_value in (None, ""):
+            continue
+        if _looks_like_remote_taco_path(path_value):
+            continue
+        return resolve_path(path_value, config)
+
+    return None
+
+
+def resolve_oceantaco_path(config: Dict[str, Any], default_remote: str) -> str:
+    oceantaco_cfg = config.get("oceantaco", {})
+    taco_path = oceantaco_cfg.get("taco_path")
+
+    if taco_path not in (None, ""):
+        if isinstance(taco_path, str) and "huggingface.co/datasets/" in taco_path and "/resolve/main/" in taco_path:
+            LOGGER.warning(
+                "Configured taco_path=%s looks like a raw Hugging Face resolve URL. "
+                "Falling back to OceanTACO HF_DEFAULT_URL because the package expects a dataset root handle.",
+                taco_path,
+            )
+            return default_remote
+        if _looks_like_remote_taco_path(taco_path):
+            return str(taco_path)
+
+        resolved_local = resolve_path(taco_path, config)
+        if resolved_local.exists():
+            return str(resolved_local)
+
+        LOGGER.warning(
+            "Configured local taco_path=%s does not exist yet. Falling back to remote dataset root.",
+            resolved_local,
+        )
+        return default_remote
+
+    local_download_path = get_configured_local_oceantaco_path(config)
+    if local_download_path is not None and local_download_path.exists():
+        LOGGER.info("Using local OceanTACO mirror at %s", local_download_path)
+        return str(local_download_path)
+
+    return default_remote
 
 
 def _is_mergeable_grid(data) -> bool:
@@ -377,16 +441,7 @@ def build_dataset(config: Dict[str, Any], split_name: str):
     data_cfg = config["data"]
     grid_cfg = data_cfg["grid"]
 
-    taco_path = config.get("oceantaco", {}).get("taco_path")
-    if not taco_path:
-        taco_path = HF_DEFAULT_URL
-    elif isinstance(taco_path, str) and "huggingface.co/datasets/" in taco_path and "/resolve/main/" in taco_path:
-        LOGGER.warning(
-            "Configured taco_path=%s looks like a raw Hugging Face resolve URL. "
-            "Falling back to OceanTACO HF_DEFAULT_URL because the package expects a dataset root handle.",
-            taco_path,
-        )
-        taco_path = HF_DEFAULT_URL
+    taco_path = resolve_oceantaco_path(config, HF_DEFAULT_URL)
     queries = build_queries(config, split_name)
     LOGGER.info(
         "Creating OceanTACO dataset for split=%s with %s queries, %s inputs, %s targets, grid=%sx%s",
@@ -550,6 +605,31 @@ def _normalise_tensor(tensor: torch.Tensor, source_cfg: Dict[str, Any]) -> torch
         mask = torch.isfinite(output)
 
     output[mask] = (output[mask] - float(mean)) / float(std)
+    return output
+
+
+def denormalise_tensor(
+    tensor: torch.Tensor,
+    source_cfg: Dict[str, Any],
+    *,
+    preserve_zero_mask: bool = False,
+) -> torch.Tensor:
+    output = tensor.clone().float()
+    norm_cfg = source_cfg.get("normalize")
+    if not norm_cfg:
+        return output
+
+    mean = norm_cfg.get("mean")
+    std = norm_cfg.get("std")
+    if mean is None or std in (None, 0):
+        return output
+
+    if preserve_zero_mask and norm_cfg.get("mask_zeros", True):
+        mask = output != 0
+    else:
+        mask = torch.isfinite(output)
+
+    output[mask] = output[mask] * float(std) + float(mean)
     return output
 
 

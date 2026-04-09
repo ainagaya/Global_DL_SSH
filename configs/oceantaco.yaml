@@ -22,6 +22,9 @@ tracking:
 
 oceantaco:
   taco_path:
+  download_path: ./oceantaco_data/OceanTACO
+  hf_repo_id: nilsleh/OceanTACO
+  revision: main
 
 regions:
   global:

@@ -13,6 +13,7 @@ from src.oceantaco import (
     batch_input_fields,
     batch_to_model_tensors,
     build_queries,
+    denormalise_tensor,
     get_collate_fn,
     prediction_records,
 )
@@ -162,6 +163,26 @@ def test_batch_input_fields_convert_kelvin_sst_and_mask_invalid_values(base_conf
     assert torch.isclose(raw_inputs["l4_sst"][0, 0, 0, 0], torch.tensor(26.85), atol=1e-4)
     assert raw_inputs["l4_sst"][0, 0, 0, 1] == 0.0
     assert torch.isclose(normalised_inputs["l4_sst"][0, 0, 0, 0], torch.tensor((26.85 - 20.157) / 8.726), atol=1e-4)
+
+
+def test_denormalise_tensor_restores_physical_units(base_config):
+    source_cfg = base_config["data"]["inputs"][0]
+    normalised = torch.tensor([[[1.0, -1.0]]], dtype=torch.float32)
+
+    restored = denormalise_tensor(normalised, source_cfg)
+
+    assert torch.isclose(restored[0, 0, 0], torch.tensor(0.1726), atol=1e-4)
+    assert torch.isclose(restored[0, 0, 1], torch.tensor(-0.0246), atol=1e-4)
+
+
+def test_denormalise_tensor_can_preserve_zero_mask(base_config):
+    source_cfg = base_config["data"]["targets"][0]
+    normalised = torch.tensor([[[0.0, 1.0]]], dtype=torch.float32)
+
+    restored = denormalise_tensor(normalised, source_cfg, preserve_zero_mask=True)
+
+    assert restored[0, 0, 0] == 0.0
+    assert torch.isclose(restored[0, 0, 1], torch.tensor(0.1726), atol=1e-4)
 
 
 def test_batch_input_fields_preserve_celsius_sst_without_double_conversion(base_config):

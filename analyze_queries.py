@@ -303,7 +303,7 @@ def import_runtime_helpers():
     # inspection still works even when the ML dependencies are not available.
     try:
         from src.config_utils import load_config
-        from src.oceantaco import _build_patched_dataset_class, _import_oceantaco
+        from src.oceantaco import _build_patched_dataset_class, _import_oceantaco, resolve_oceantaco_path
     except ImportError as exc:
         emit_warning(
             "Data inspection requires the project runtime dependencies, including OceanTACO and its loader stack. "
@@ -311,7 +311,7 @@ def import_runtime_helpers():
         )
         raise SystemExit(2) from exc
 
-    return load_config, _build_patched_dataset_class, _import_oceantaco
+    return load_config, _build_patched_dataset_class, _import_oceantaco, resolve_oceantaco_path
 
 
 def describe_variable_payload(value: Any) -> dict[str, Any]:
@@ -376,7 +376,7 @@ def describe_variable_payload(value: Any) -> dict[str, Any]:
 
 
 def inspect_query_file_data(path: Path, config_path: str | Path, max_samples: int) -> None:
-    load_config, build_patched_dataset_class, import_oceantaco = import_runtime_helpers()
+    load_config, build_patched_dataset_class, import_oceantaco, resolve_oceantaco_path = import_runtime_helpers()
     config = load_config(config_path)
     OceanTACODataset, _, _, QueryGenerator, HF_DEFAULT_URL, ocean_dataset_module = import_oceantaco()
 
@@ -390,16 +390,7 @@ def inspect_query_file_data(path: Path, config_path: str | Path, max_samples: in
 
     data_cfg = config["data"]
     grid_cfg = data_cfg["grid"]
-    taco_path = config.get("oceantaco", {}).get("taco_path")
-    if not taco_path:
-        taco_path = HF_DEFAULT_URL
-    elif isinstance(taco_path, str) and "huggingface.co/datasets/" in taco_path and "/resolve/main/" in taco_path:
-        print(
-            "data_check_warning:"
-            f" taco_path={taco_path} looks like a raw Hugging Face resolve URL."
-            " Using OceanTACO HF_DEFAULT_URL instead."
-        )
-        taco_path = HF_DEFAULT_URL
+    taco_path = resolve_oceantaco_path(config, HF_DEFAULT_URL)
     dataset_cls = build_patched_dataset_class(OceanTACODataset, ocean_dataset_module)
     dataset = dataset_cls(
         taco_path=taco_path,

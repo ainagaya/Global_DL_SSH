@@ -1106,6 +1106,25 @@ Smoke test:
   inspect nested exception chains and treat `ChunkedEncodingError`,
   `ProtocolError`, `IncompleteRead`, and related "connection broken" messages as
   transient so those OceanTACO loads are retried instead of crashing training.
+- A later workflow addition introduced local OceanTACO mirroring driven by the
+  YAML config. New config fields under `oceantaco`:
+  - `download_path`: local mirror root
+  - `hf_repo_id`: dataset repo id (default `nilsleh/OceanTACO`)
+  - `revision`: dataset revision (default `main`)
+  `src/oceantaco.py` now has a shared `resolve_oceantaco_path(...)` helper so
+  training, inference, and `analyze_queries.py` automatically prefer the local
+  mirror when it exists and otherwise fall back to `HF_DEFAULT_URL`. A new
+  script `download_oceantaco_local.py` builds the configured queries, resolves
+  the required OceanTACO files for the selected splits, downloads those files
+  plus dataset metadata into the local mirror, and writes a manifest file.
+- A later plotting/debugging issue was traced to unit inconsistency in
+  prediction exports: `simvp_predict_ssh.py` was saving `prediction` and
+  `target` in normalized model space while `input_l3_ssh` / `input_l4_sst` were
+  saved in physical units. This made target SWOT values appear an order of
+  magnitude larger/smaller than SSH inputs even when the underlying stats were
+  fine. `src/oceantaco.py` now provides `denormalise_tensor(...)`, and
+  `simvp_predict_ssh.py` denormalizes saved predictions and targets back to
+  physical units before writing `.npz` artifacts.
 
 
 ## Documentation changes made

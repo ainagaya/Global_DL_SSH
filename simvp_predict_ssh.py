@@ -13,7 +13,14 @@ from torch.utils.data import DataLoader
 from src.config_utils import ensure_dir, load_config
 from src.logging_utils import configure_logging
 from src.mlflow_utils import MLflowTracker
-from src.oceantaco import batch_input_fields, batch_to_model_tensors, build_dataset, get_collate_fn, prediction_records
+from src.oceantaco import (
+    batch_input_fields,
+    batch_to_model_tensors,
+    build_dataset,
+    denormalise_tensor,
+    get_collate_fn,
+    prediction_records,
+)
 from src.simvp_model import SimVP_Model_no_skip_configurable
 
 LOGGER = logging.getLogger(__name__)
@@ -162,6 +169,21 @@ def _merge_prediction_runtime_config(runtime_config: dict, checkpoint_config: di
     return effective_config
 
 
+def _denormalise_prediction_tensor(
+    tensor: torch.Tensor,
+    variable_configs: list[dict],
+    *,
+    preserve_zero_mask: bool,
+) -> torch.Tensor:
+    channel_tensors = []
+    for channel_index, source_cfg in enumerate(variable_configs):
+        channel = tensor[:, :, channel_index, :, :]
+        channel_tensors.append(
+            denormalise_tensor(channel, source_cfg, preserve_zero_mask=preserve_zero_mask)
+        )
+    return torch.stack(channel_tensors, dim=2)
+
+
 def main():
     args = parse_args()
     runtime_config = load_config(args.config)
@@ -270,8 +292,18 @@ def main():
                 ]
                 inputs_cpu = inputs.cpu().numpy()
                 inputs = inputs.to(device)
-                predictions = model(inputs).cpu().numpy()
-                targets = targets.numpy()
+                predictions = model(inputs).cpu()
+                targets = targets.cpu()
+                predictions = _denormalise_prediction_tensor(
+                    predictions,
+                    config["data"]["targets"],
+                    preserve_zero_mask=False,
+                ).numpy()
+                targets = _denormalise_prediction_tensor(
+                    targets,
+                    config["data"]["targets"],
+                    preserve_zero_mask=True,
+                ).numpy()
 
                 batch_size = predictions.shape[0]
                 for sample_index in range(batch_size):

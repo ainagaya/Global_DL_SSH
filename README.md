@@ -36,6 +36,18 @@ Run training with:
 python3 simvp_ddp_training.py --config configs/oceantaco.yaml
 ```
 
+To download a local OceanTACO mirror for the files required by your configured
+splits, run:
+
+```bash
+python3 download_oceantaco_local.py --config configs/oceantaco.yaml
+```
+
+The downloader reads the configured splits, variables, and query settings,
+downloads the matching OceanTACO files plus dataset metadata into
+`oceantaco.download_path`, and the training / inference / query-analysis
+pipeline will automatically use that local mirror when it exists.
+
 Smoke-test training:
 
 ```bash
@@ -68,6 +80,7 @@ Notes for the OceanTACO workflow:
 - Training splits use `QueryGenerator.generate_training_queries(...)`.
 - Validation and test splits use `QueryGenerator.generate_eval_queries(...)`.
 - Training and prediction require `ocean-taco`, `torch`, `xarray`, `numpy`, `pandas`, and `PyYAML`.
+- Local OceanTACO mirroring uses `oceantaco.download_path` and may use `huggingface_hub` when available for efficient dataset downloads.
 - MLflow is optional, but the provided Dockerfile installs it.
 
 This repo contains python code for training and inference workflows for SSH mapping from OceanTACO data.
