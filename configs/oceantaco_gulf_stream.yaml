@@ -76,8 +76,8 @@ splits:
     strategy: training
     start_date: 2025-01-15
     end_date: 2025-03-15
-    n_queries: 128
-    # n_queries: 1
+    # n_queries: 128
+    n_queries: 1
     regions:
       - gulf_stream
   validation:

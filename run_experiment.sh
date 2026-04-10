@@ -152,4 +152,4 @@ echo "Experiment directory: $EXPERIMENT_DIR"
 echo "Frozen runtime config: $RUNTIME_CONFIG"
 echo "Launching training..."
 
-python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "$@"
+python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "$@" > "$EXPERIMENT_DIR/logs/training_stdout.log" 2> "$EXPERIMENT_DIR/logs/training_stderr.log"
