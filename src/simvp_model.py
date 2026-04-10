@@ -10,6 +10,69 @@ from modules import (ConvSC, ConvNeXtSubBlock, ConvMixerSubBlock, GASubBlock, gI
 import torch.nn.functional as F
 
 
+def _model_variant_name(model_cfg):
+    variant = model_cfg.get("variant", "no_skip_configurable")
+    return str(variant).lower()
+
+
+def describe_model_config(config):
+    model_cfg = config["model"]
+    input_variables = [str(variable_cfg["key"]) for variable_cfg in config["data"]["inputs"]]
+    target_variables = [str(variable_cfg["key"]) for variable_cfg in config["data"]["targets"]]
+    return {
+        "variant": _model_variant_name(model_cfg),
+        "type": str(model_cfg["type"]).lower(),
+        "input_channels": len(input_variables),
+        "target_channels": len(target_variables),
+        "input_variables": input_variables,
+        "target_variables": target_variables,
+        "uses_l4_sst_input": "l4_sst" in input_variables,
+    }
+
+
+def build_simvp_model_from_config(config):
+    model_cfg = config["model"]
+    grid_cfg = config["data"]["grid"]
+    sequence_length = int(config["data"]["sequence_length"])
+    input_channels = len(config["data"]["inputs"])
+    target_channels = len(config["data"]["targets"])
+    common_kwargs = {
+        "in_shape": (sequence_length, input_channels, int(grid_cfg["height"]), int(grid_cfg["width"])),
+        "model_type": model_cfg["type"],
+        "hid_S": int(model_cfg["hidden_spatial"]),
+        "hid_T": int(model_cfg["hidden_temporal"]),
+        "N_S": int(model_cfg["spatial_depth"]),
+        "N_T": int(model_cfg["temporal_depth"]),
+        "drop": float(model_cfg["drop"]),
+        "drop_path": float(model_cfg["drop_path"]),
+    }
+    variant = _model_variant_name(model_cfg)
+
+    if variant in {"configurable", "no_skip_configurable"}:
+        return SimVP_Model_no_skip_configurable(out_channels=target_channels, **common_kwargs)
+
+    if variant in {"no_skip", "simvp_no_skip"}:
+        if input_channels != target_channels:
+            raise ValueError(
+                "model.variant=no_skip requires the same number of input and target channels. "
+                f"Got inputs={input_channels}, targets={target_channels}."
+            )
+        return SimVP_Model_no_skip(**common_kwargs)
+
+    if variant in {"no_skip_sst", "sst"}:
+        if input_channels != 2 or target_channels != 1:
+            raise ValueError(
+                "model.variant=no_skip_sst expects exactly 2 input channels and 1 target channel. "
+                f"Got inputs={input_channels}, targets={target_channels}."
+            )
+        return SimVP_Model_no_skip_sst(**common_kwargs)
+
+    raise ValueError(
+        "Unsupported model.variant. Expected one of "
+        "'no_skip_configurable', 'no_skip', or 'no_skip_sst'."
+    )
+
+
 class SimVP_Model_no_skip(nn.Module):
     r"""SimVP Model
 

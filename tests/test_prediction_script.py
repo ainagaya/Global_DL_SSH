@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import torch
 
 import simvp_predict_ssh as prediction_script
+from src.simvp_model import describe_model_config
 
 
 def test_nonempty_target_mask_marks_all_zero_targets_as_empty():
@@ -93,3 +95,30 @@ def test_sample_plot_input_fields_handles_single_2d_raw_sample(base_config):
     assert fields["l3_ssh"].shape == (5, 96, 96)
     assert fields["l4_sst"].shape == (5, 96, 96)
     assert torch.all(fields["l4_sst"] == 25.0)
+
+
+def test_infer_sample_input_statuses_marks_missing_and_degenerate_inputs(base_config):
+    sample = {
+        "inputs": {
+            "l3_ssh": {"data": torch.zeros(5, 32, 32)},
+            "l4_sst": None,
+        },
+        "targets": {"l3_swot": {"data": torch.ones(5, 32, 32)}},
+        "metadata": {"bbox": (0.0, 1.0, 2.0, 3.0), "time_range": ("2025-04-01", "2025-04-05")},
+    }
+
+    statuses = prediction_script.infer_sample_input_statuses(sample, base_config)
+
+    assert statuses["l3_ssh"]["dataset_status"] == "degenerate"
+    assert statuses["l3_ssh"]["model_status"] == "zero_filled_degenerate"
+    assert statuses["l4_sst"]["dataset_status"] == "missing_from_dataset"
+    assert statuses["l4_sst"]["model_status"] == "zero_filled_missing"
+
+
+def test_describe_model_config_reports_sst_usage(base_config):
+    metadata = describe_model_config(base_config)
+
+    assert metadata["variant"] == "no_skip_configurable"
+    assert metadata["type"] == "gsta"
+    assert metadata["uses_l4_sst_input"] is True
+    assert "l4_sst" in metadata["input_variables"]

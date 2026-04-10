@@ -95,6 +95,7 @@ splits:
     regions: global
 
 model:
+  variant: no_skip_configurable
   type: gsta
   hidden_spatial: 8
   hidden_temporal: 128

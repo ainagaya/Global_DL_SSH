@@ -18,7 +18,7 @@ from src.logging_utils import configure_logging
 from src.mlflow_utils import MLflowTracker
 from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn
 from src.pytorch_losses import torch_masked_mse
-from src.simvp_model import SimVP_Model_no_skip_configurable
+from src.simvp_model import build_simvp_model_from_config, describe_model_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,23 +60,7 @@ def set_seed(seed: int) -> None:
 
 
 def build_model(config):
-    grid_cfg = config["data"]["grid"]
-    model_cfg = config["model"]
-    sequence_length = int(config["data"]["sequence_length"])
-    input_channels = len(config["data"]["inputs"])
-    target_channels = len(config["data"]["targets"])
-
-    return SimVP_Model_no_skip_configurable(
-        in_shape=(sequence_length, input_channels, int(grid_cfg["height"]), int(grid_cfg["width"])),
-        out_channels=target_channels,
-        model_type=model_cfg["type"],
-        hid_S=int(model_cfg["hidden_spatial"]),
-        hid_T=int(model_cfg["hidden_temporal"]),
-        N_S=int(model_cfg["spatial_depth"]),
-        N_T=int(model_cfg["temporal_depth"]),
-        drop=float(model_cfg["drop"]),
-        drop_path=float(model_cfg["drop_path"]),
-    )
+    return build_simvp_model_from_config(config)
 
 
 def build_dataloader(dataset, batch_size, shuffle, num_workers, collate_fn, device, training_cfg):
@@ -175,7 +159,8 @@ def main():
 
         use_amp = bool(training_cfg["amp"]) and device.type == "cuda"
         model = build_model(config).to(device)
-        LOGGER.info("Using device=%s amp=%s", device, use_amp)
+        model_metadata = describe_model_config(config)
+        LOGGER.info("Using device=%s amp=%s model=%s", device, use_amp, model_metadata)
         optimizer = torch.optim.Adam(model.parameters(), lr=float(training_cfg["learning_rate"]))
         scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
@@ -251,6 +236,7 @@ def main():
                 "val_loss": val_loss,
                 "config_path": config["__config_path__"],
                 "config_snapshot": copy.deepcopy(config),
+                "model_metadata": copy.deepcopy(model_metadata),
             }
             checkpoint_path = weights_dir / f"{checkpoint_name}_epoch{epoch}.pt"
             torch.save(checkpoint, checkpoint_path)

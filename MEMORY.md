@@ -24,12 +24,106 @@ Debugging utility:
 
 - `analyze_queries.py`
 - `plot_predictions.py`
+- `plot_prediction_regions.py`
 
 Main configs:
 
 - `configs/oceantaco.yaml`
 - `configs/oceantaco_smoke_test.yaml`
 - `configs/oceantaco_gulf_stream.yaml`
+
+
+## Recent additions
+
+### Geographic region plotting for predictions
+
+Decision:
+
+- Add a dedicated plotting script for geography-aware summary figures across
+  many predicted regions at the same target date.
+
+Why:
+
+- The user wanted a figure that shows a wider map around each bbox, highlights
+  the bbox itself, includes coastlines, and compares source / prediction /
+  target in one figure for all regions predicted on a chosen date.
+
+Implementation:
+
+- Added `plot_prediction_regions.py`
+- Accepts either a single `.npz` file or a directory of `.npz` prediction files
+- Filters files by `--date`
+- Builds one figure with one row per matching prediction region
+- Each row includes:
+  - a context map around the bbox
+  - a red bbox rectangle
+  - source field
+  - prediction field
+  - target field
+- Uses `cartopy` for coastlines and land when available, and falls back to
+  plain matplotlib axes if `cartopy` is unavailable
+
+Usage:
+
+- `python3 plot_prediction_regions.py predictions --date 2025-03-21`
+- `python3 plot_prediction_regions.py predictions --date 2025-03-21 --source-key input_l4_sst`
+
+
+### Model selection is now config-driven
+
+Decision:
+
+- Stop hard-coding `SimVP_Model_no_skip_configurable` in the train/predict entrypoints.
+
+Why:
+
+- The user wanted the model family to be selectable from YAML and wanted a clear way to know whether SST was actually part of the trained model.
+
+Implementation:
+
+- Added `model.variant` to configs
+- Supported variants:
+  - `no_skip_configurable`
+  - `no_skip`
+  - `no_skip_sst`
+- Added `build_simvp_model_from_config(...)` and `describe_model_config(...)` to `src/simvp_model.py`
+- Training checkpoints now store `model_metadata`, including:
+  - selected variant
+  - selected hidden block type
+  - configured input variables
+  - configured target variables
+  - whether `l4_sst` was included as a model input
+
+
+### Prediction artifacts now separate raw SST availability from model fallback
+
+Decision:
+
+- Make saved prediction `.npz` files explicit about raw input availability versus what the model actually received.
+
+Why:
+
+- The user wanted to debug whether missing SST in saved prediction files meant:
+  - SST was truly unavailable in the dataset
+  - SST was present but degenerate
+  - SST had been zero-filled for the model
+
+Implementation:
+
+- Added `infer_sample_input_statuses(...)` in `simvp_predict_ssh.py`
+- Saved per-input status fields such as:
+  - `input_l4_sst_dataset_status`
+  - `input_l4_sst_model_status`
+- Saved both:
+  - `input_l4_sst`: raw observed SST field from the dataset
+  - `model_input_l4_sst`: actual SST field fed to the model after preprocessing / fallback
+- The same pattern also applies to `l3_ssh`
+
+Interpretation:
+
+- `input_l4_sst_dataset_status=missing_from_dataset` means OceanTACO did not provide SST for that sample
+- `input_l4_sst_dataset_status=degenerate` means SST existed but was effectively unusable / zero-dominated
+- `input_l4_sst_model_status=zero_filled_missing` means the model still ran, but the SST channel was a zero-filled fallback
 
 
 ## Working preferences

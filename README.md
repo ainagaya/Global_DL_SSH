@@ -9,6 +9,7 @@ The new default path uses the installable `ocean-taco` package and lets you choo
 - which dates belong to train, validation, and test splits
 - which region bbox presets to use for each split, or `global`
 - the query patch size, time window, output grid, normalization, model hyperparameters, and output paths
+- the SimVP model variant (`no_skip_configurable`, `no_skip`, or `no_skip_sst`) and hidden block type (`gsta`, `convnext`, `swin`, `tau`, etc.)
 
 The main configuration lives in [`configs/oceantaco.yaml`](configs/oceantaco.yaml).
 
@@ -73,6 +74,19 @@ python3 plot_predictions.py predictions
 python3 plot_predictions.py predictions/example_file.npz --time-index 0 --channel-index 0
 ```
 
+To generate one geographic summary figure for a specific date across all saved
+prediction regions, use:
+
+```bash
+python3 plot_prediction_regions.py predictions --date 2025-03-21
+python3 plot_prediction_regions.py predictions --date 2025-03-21 --source-key input_l4_sst
+```
+
+This script creates one figure with one row per predicted region. Each row
+contains a wider context map around the bbox, the selected bbox outline, and
+the source, prediction, and target fields for that date. If `cartopy` is
+installed, coastlines and land are added automatically.
+
 Notes for the OceanTACO workflow:
 
 - `splits.<name>.regions: global` uses a global query bbox.
@@ -82,6 +96,22 @@ Notes for the OceanTACO workflow:
 - Training and prediction require `ocean-taco`, `torch`, `xarray`, `numpy`, `pandas`, and `PyYAML`.
 - Local OceanTACO mirroring uses `oceantaco.download_path` and may use `huggingface_hub` when available for efficient dataset downloads.
 - MLflow is optional, but the provided Dockerfile installs it.
+
+Model selection notes:
+
+- `model.variant: no_skip_configurable` is the current default and supports different input/output channel counts.
+- `model.variant: no_skip` requires the same number of input and target channels.
+- `model.variant: no_skip_sst` uses a dedicated two-encoder SSH+SST path and expects exactly two inputs and one target.
+- `model.type` selects the hidden translator family inside the SimVP model, such as `gsta`, `convnext`, `swin`, `vit`, `uniformer`, `tau`, or `incepu`.
+
+Checkpoint and prediction provenance:
+
+- Training checkpoints now store `model_metadata`, including the chosen model variant, model type, configured input variables, and whether `l4_sst` was part of the model inputs.
+- Prediction `.npz` files now distinguish raw observed inputs from actual model inputs:
+  - `input_l4_sst`: raw observed SST from the dataset, or `None` if unavailable
+  - `model_input_l4_sst`: the SST field that the model actually received after preprocessing / zero-fill fallback
+  - `input_l4_sst_dataset_status`: `observed`, `missing_from_dataset`, or `degenerate`
+  - `input_l4_sst_model_status`: `observed`, `zero_filled_missing`, or `zero_filled_degenerate`
 
 This repo contains python code for training and inference workflows for SSH mapping from OceanTACO data.
 

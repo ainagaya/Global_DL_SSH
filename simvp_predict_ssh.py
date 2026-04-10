@@ -21,7 +21,7 @@ from src.oceantaco import (
     get_collate_fn,
     prediction_records,
 )
-from src.simvp_model import SimVP_Model_no_skip_configurable
+from src.simvp_model import build_simvp_model_from_config, describe_model_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,23 +47,7 @@ def parse_args():
 
 
 def build_model(config):
-    grid_cfg = config["data"]["grid"]
-    model_cfg = config["model"]
-    sequence_length = int(config["data"]["sequence_length"])
-    input_channels = len(config["data"]["inputs"])
-    target_channels = len(config["data"]["targets"])
-
-    return SimVP_Model_no_skip_configurable(
-        in_shape=(sequence_length, input_channels, int(grid_cfg["height"]), int(grid_cfg["width"])),
-        out_channels=target_channels,
-        model_type=model_cfg["type"],
-        hid_S=int(model_cfg["hidden_spatial"]),
-        hid_T=int(model_cfg["hidden_temporal"]),
-        N_S=int(model_cfg["spatial_depth"]),
-        N_T=int(model_cfg["temporal_depth"]),
-        drop=float(model_cfg["drop"]),
-        drop_path=float(model_cfg["drop_path"]),
-    )
+    return build_simvp_model_from_config(config)
 
 
 def nonempty_target_mask(targets: torch.Tensor) -> torch.Tensor:
@@ -132,6 +116,47 @@ def sample_plot_input_fields(sample: dict, config: dict) -> dict[str, torch.Tens
         variable_name: tensor[0]
         for variable_name, tensor in prepared.items()
     }
+
+
+def configured_input_keys(config: dict) -> list[str]:
+    return [str(variable_cfg["key"]) for variable_cfg in config["data"]["inputs"]]
+
+
+def infer_sample_input_statuses(sample: dict, config: dict) -> dict[str, dict[str, object]]:
+    observed_fields = sample_plot_input_fields(sample, config)
+    statuses: dict[str, dict[str, object]] = {}
+    configured_keys = configured_input_keys(config)
+
+    for variable_name in configured_keys:
+        payload = sample.get("inputs", {}).get(variable_name)
+        field = None if observed_fields is None else observed_fields.get(variable_name)
+        is_configured = True
+        if payload is None or payload.get("data") is None:
+            dataset_status = "missing_from_dataset"
+            model_status = "zero_filled_missing"
+        elif field is None:
+            dataset_status = "missing_from_dataset"
+            model_status = "zero_filled_missing"
+        else:
+            field_array = field.detach().cpu().numpy()
+            if np.isnan(field_array).all():
+                dataset_status = "missing_from_dataset"
+                model_status = "zero_filled_missing"
+            elif is_degenerate_input_field(field_array):
+                dataset_status = "degenerate"
+                model_status = "zero_filled_degenerate"
+            else:
+                dataset_status = "observed"
+                model_status = "observed"
+
+        statuses[variable_name] = {
+            "configured": is_configured,
+            "dataset_status": dataset_status,
+            "model_status": model_status,
+            "field": field,
+        }
+
+    return statuses
 
 
 def _load_checkpoint_training_config(checkpoint: dict) -> dict | None:
@@ -223,6 +248,7 @@ def main():
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = build_model(config).to(device)
+        model_metadata = checkpoint.get("model_metadata") or describe_model_config(config)
         try:
             model.load_state_dict(checkpoint["model_state_dict"])
         except RuntimeError as exc:
@@ -232,7 +258,11 @@ def main():
                 "with an embedded config snapshot by training again with the updated script."
             ) from exc
         model.eval()
-        LOGGER.info("Using device=%s for inference", device)
+        LOGGER.info("Using device=%s for inference model=%s", device, model_metadata)
+        input_channel_indices = {
+            variable_name: channel_index
+            for channel_index, variable_name in enumerate(configured_input_keys(config))
+        }
 
         saved_files = 0
         skipped_batches = 0
@@ -290,7 +320,12 @@ def main():
                 raw_samples = None if raw_samples is None else [
                     sample for sample, keep in zip(raw_samples, valid_target_mask.tolist()) if keep
                 ]
-                inputs_cpu = inputs.cpu().numpy()
+                input_tensor_cpu = inputs.cpu()
+                model_inputs = _denormalise_prediction_tensor(
+                    input_tensor_cpu,
+                    config["data"]["inputs"],
+                    preserve_zero_mask=True,
+                ).numpy()
                 inputs = inputs.to(device)
                 predictions = model(inputs).cpu()
                 targets = targets.cpu()
@@ -308,11 +343,15 @@ def main():
                 batch_size = predictions.shape[0]
                 for sample_index in range(batch_size):
                     record = records[sample_index]
-                    sample_input_fields = None if raw_samples is None else sample_plot_input_fields(raw_samples[sample_index], config)
-                    sample_l3_ssh = None if sample_input_fields is None else sample_input_fields.get("l3_ssh")
-                    sample_l4_sst = None if sample_input_fields is None else sample_input_fields.get("l4_sst")
+                    sample_statuses = (
+                        {} if raw_samples is None else infer_sample_input_statuses(raw_samples[sample_index], config)
+                    )
+                    sample_l3_ssh = None if "l3_ssh" not in sample_statuses else sample_statuses["l3_ssh"]["field"]
+                    sample_l4_sst = None if "l4_sst" not in sample_statuses else sample_statuses["l4_sst"]["field"]
                     sample_l3_ssh_np = None if sample_l3_ssh is None else sample_l3_ssh.cpu().numpy()
                     sample_l4_sst_np = None if sample_l4_sst is None else sample_l4_sst.cpu().numpy()
+                    l3_ssh_channel = input_channel_indices.get("l3_ssh")
+                    l4_sst_channel = input_channel_indices.get("l4_sst")
                     lon_min, lon_max, lat_min, lat_max = record["bbox"]
                     target_date = record["target_date"]
                     save_path = output_dir / (
@@ -323,18 +362,28 @@ def main():
                         save_path,
                         prediction=predictions[sample_index],
                         target=targets[sample_index],
-                        input_l3_ssh=sample_l3_ssh_np if sample_l3_ssh_np is not None else inputs_cpu[sample_index, :, 0],
-                        input_l4_sst=sample_l4_sst_np if sample_l4_sst_np is not None else None,
-                        input_l3_ssh_present=(
-                            "l3_ssh" in present_inputs
-                            and sample_l3_ssh_np is not None
-                            and not is_degenerate_input_field(sample_l3_ssh_np)
+                        input_l3_ssh=sample_l3_ssh_np,
+                        input_l4_sst=sample_l4_sst_np,
+                        input_l3_ssh_present=(sample_statuses.get("l3_ssh", {}).get("dataset_status") == "observed"),
+                        input_l4_sst_present=(sample_statuses.get("l4_sst", {}).get("dataset_status") == "observed"),
+                        input_l3_ssh_dataset_status=sample_statuses.get("l3_ssh", {}).get("dataset_status", "not_configured"),
+                        input_l4_sst_dataset_status=sample_statuses.get("l4_sst", {}).get("dataset_status", "not_configured"),
+                        input_l3_ssh_model_status=sample_statuses.get("l3_ssh", {}).get("model_status", "not_configured"),
+                        input_l4_sst_model_status=sample_statuses.get("l4_sst", {}).get("model_status", "not_configured"),
+                        model_input_l3_ssh=(
+                            model_inputs[sample_index, :, l3_ssh_channel]
+                            if l3_ssh_channel is not None
+                            else None
                         ),
-                        input_l4_sst_present=(
-                            "l4_sst" in present_inputs
-                            and sample_l4_sst_np is not None
-                            and not is_degenerate_input_field(sample_l4_sst_np)
+                        model_input_l4_sst=(
+                            model_inputs[sample_index, :, l4_sst_channel]
+                            if l4_sst_channel is not None
+                            else None
                         ),
+                        model_variant=model_metadata["variant"],
+                        model_type=model_metadata["type"],
+                        configured_inputs=np.array(model_metadata["input_variables"]),
+                        uses_l4_sst_input=bool(model_metadata["uses_l4_sst_input"]),
                         bbox=np.array(record["bbox"], dtype=np.float32),
                         time_range=np.array(record["time_range"]),
                         target_date=target_date,

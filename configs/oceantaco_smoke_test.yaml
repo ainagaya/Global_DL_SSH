@@ -96,6 +96,7 @@ splits:
       - smoke_test
 
 model:
+  variant: no_skip_configurable
   type: gsta
   hidden_spatial: 4
   hidden_temporal: 48
