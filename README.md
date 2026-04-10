@@ -55,6 +55,22 @@ Smoke-test training:
 python3 simvp_ddp_training.py --config configs/oceantaco_smoke_test.yaml
 ```
 
+To launch a fully tracked experiment run under `experiments/a000`, `a001`, ...
+use:
+
+```bash
+./run_experiment.sh configs/oceantaco_smoke_test.yaml
+```
+
+The launcher will:
+
+- refuse to run if the git worktree is dirty
+- assign the next experiment id
+- record the current git commit
+- copy the base config into the experiment folder
+- write a frozen runtime config with experiment-specific output paths
+- store weights, logs, predictions, queries, and MLflow artifacts inside that experiment directory
+
 Run inference with:
 
 ```bash

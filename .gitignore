@@ -15,6 +15,7 @@ model_weights/
 loss_logs/
 predictions/
 mlruns/
+experiments/
 
 *.pt
 *.pth

@@ -35,6 +35,36 @@ Main configs:
 
 ## Recent additions
 
+### Experiment launcher
+
+Decision:
+
+- Add a tiny bash workflow manager instead of introducing a larger orchestration dependency.
+
+Why:
+
+- The user wanted numbered experiment folders, git commit tracking, clean-worktree enforcement, config snapshotting, and all outputs grouped under one directory.
+
+Implementation:
+
+- Added `run_experiment.sh`
+- It:
+  - refuses to run on a dirty git tree
+  - assigns the next experiment id under `experiments/` as `a000`, `a001`, ...
+  - records git commit and branch metadata
+  - copies the base config to `experiments/<id>/<id>_base_config.yaml`
+  - writes a frozen runtime config to `experiments/<id>/<id>_runtime_config.yaml`
+  - rewrites output paths so weights, logs, predictions, queries, and mlflow data land inside the experiment directory
+  - sets `training.checkpoint_name` to the experiment id
+  - launches `simvp_ddp_training.py --config <runtime_config>`
+
+Related repo changes:
+
+- `.gitignore` now ignores `experiments/`
+
+
+## Recent additions
+
 ### Geographic region plotting for predictions
 
 Decision:
