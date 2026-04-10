@@ -10,7 +10,7 @@ set -euo pipefail
 # - stores both an exact copy of the user config and a runtime config snapshot
 # - rewrites all output paths so weights, logs, predictions, queries, and mlflow
 #   artifacts land inside the experiment directory
-# - launches training using the frozen runtime config
+# - launches training, inference, and analysis using the frozen runtime config
 
 usage() {
   cat <<'EOF'
@@ -19,7 +19,7 @@ Usage:
 
 Example:
   ./run_experiment.sh configs/oceantaco_smoke_test.yaml
-  ./run_experiment.sh configs/oceantaco_gulf_stream.yaml --checkpoint experiments/a003/weights/a003_epoch4.pt
+  ./run_experiment.sh configs/oceantaco_gulf_stream.yaml
 EOF
 }
 
@@ -77,11 +77,12 @@ LOGS_DIR="$EXPERIMENT_DIR/logs"
 PREDICTIONS_DIR="$EXPERIMENT_DIR/predictions"
 QUERIES_DIR="$EXPERIMENT_DIR/queries"
 MLRUNS_DIR="$EXPERIMENT_DIR/mlruns"
+ANALYSIS_DIR="$EXPERIMENT_DIR/analysis"
 METADATA_FILE="$EXPERIMENT_DIR/${EXPERIMENT_ID}_metadata.txt"
 BASE_CONFIG_COPY="$EXPERIMENT_DIR/${EXPERIMENT_ID}_base_config.yaml"
 RUNTIME_CONFIG="$EXPERIMENT_DIR/${EXPERIMENT_ID}_runtime_config.yaml"
 
-mkdir -p "$WEIGHTS_DIR" "$LOGS_DIR" "$PREDICTIONS_DIR" "$QUERIES_DIR" "$MLRUNS_DIR"
+mkdir -p "$WEIGHTS_DIR" "$LOGS_DIR" "$PREDICTIONS_DIR" "$QUERIES_DIR" "$MLRUNS_DIR" "$ANALYSIS_DIR"
 
 GIT_COMMIT="$(git rev-parse HEAD)"
 GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -151,5 +152,37 @@ echo "Commit: $GIT_COMMIT"
 echo "Experiment directory: $EXPERIMENT_DIR"
 echo "Frozen runtime config: $RUNTIME_CONFIG"
 echo "Launching training..."
+python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "$@" 2>&1 | tee "$EXPERIMENT_DIR/logs/training.log"
 
-python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "$@" > "$EXPERIMENT_DIR/logs/training_stdout.log" 2> "$EXPERIMENT_DIR/logs/training_stderr.log"
+LATEST_CHECKPOINT="$(ls -1 "$WEIGHTS_DIR"/"${EXPERIMENT_ID}"_epoch*.pt 2>/dev/null | sort -V | tail -n 1)"
+if [[ -z "$LATEST_CHECKPOINT" ]]; then
+  echo "No checkpoint was produced in $WEIGHTS_DIR" >&2
+  exit 1
+fi
+
+LOSS_CSV="$LOGS_DIR/${EXPERIMENT_ID}_losses.csv"
+LOSS_PLOT="$ANALYSIS_DIR/${EXPERIMENT_ID}_losses.png"
+
+echo "Launching inference with checkpoint: $LATEST_CHECKPOINT"
+python3 simvp_predict_ssh.py --config "$RUNTIME_CONFIG" --checkpoint "$LATEST_CHECKPOINT" 2>&1 | tee "$EXPERIMENT_DIR/logs/prediction.log"
+
+if [[ -f "$LOSS_CSV" ]]; then
+  echo "Plotting training curves from $LOSS_CSV"
+  python3 plot_training_curves.py "$LOSS_CSV" --output "$LOSS_PLOT"
+else
+  echo "Loss CSV not found, skipping training-curve plot: $LOSS_CSV"
+fi
+
+if compgen -G "$PREDICTIONS_DIR/*.npz" > /dev/null; then
+  echo "Generating regional prediction plots for all target dates"
+  python3 plot_prediction_regions.py "$PREDICTIONS_DIR" --all-dates
+else
+  echo "No prediction .npz files found, skipping regional plots"
+fi
+
+echo "Experiment $EXPERIMENT_ID finished"
+echo "Artifacts:"
+echo "  weights: $WEIGHTS_DIR"
+echo "  logs: $LOGS_DIR"
+echo "  predictions: $PREDICTIONS_DIR"
+echo "  analysis: $ANALYSIS_DIR"

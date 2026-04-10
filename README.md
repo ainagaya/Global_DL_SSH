@@ -69,7 +69,11 @@ The launcher will:
 - record the current git commit
 - copy the base config into the experiment folder
 - write a frozen runtime config with experiment-specific output paths
-- store weights, logs, predictions, queries, and MLflow artifacts inside that experiment directory
+- run training
+- run inference with the latest checkpoint from that experiment
+- plot the training curves from the loss CSV
+- generate regional prediction plots for all available prediction dates
+- store weights, logs, predictions, queries, MLflow artifacts, and analysis plots inside that experiment directory
 
 Run inference with:
 
@@ -96,12 +100,19 @@ prediction regions, use:
 ```bash
 python3 plot_prediction_regions.py predictions --date 2025-03-21
 python3 plot_prediction_regions.py predictions --date 2025-03-21 --source-key input_l4_sst
+python3 plot_prediction_regions.py predictions --all-dates
 ```
 
 This script creates one figure with one row per predicted region. Each row
 contains a wider context map around the bbox, the selected bbox outline, and
 the source, prediction, and target fields for that date. If `cartopy` is
 installed, coastlines and land are added automatically.
+
+To plot training curves manually, use:
+
+```bash
+python3 plot_training_curves.py experiments/a000/logs/a000_losses.csv
+```
 
 Notes for the OceanTACO workflow:
 

@@ -56,8 +56,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--date",
-        required=True,
+        default=None,
         help="Target date to plot, for example 2025-03-21.",
+    )
+    parser.add_argument(
+        "--all-dates",
+        action="store_true",
+        help="Generate one regional plot per available target date in the input files.",
     )
     parser.add_argument(
         "--output",
@@ -197,6 +202,15 @@ def load_prediction_record(
         source_name=chosen_source_key,
         source=source,
     )
+
+
+def collect_available_dates(npz_files: list[Path]) -> list[str]:
+    dates: set[str] = set()
+    for npz_path in npz_files:
+        with np.load(npz_path, allow_pickle=True) as payload:
+            if "target_date" in payload:
+                dates.add(str(payload["target_date"]))
+    return sorted(dates)
 
 
 def compute_value_limits(*arrays: np.ndarray) -> tuple[float, float]:
@@ -390,30 +404,43 @@ def plot_date_records(
 def main() -> None:
     args = parse_args()
     input_path = Path(args.input_path)
-    output_path = Path(args.output) if args.output else default_output_path(input_path, args.date)
     npz_files = resolve_npz_files(input_path)
+    if args.all_dates:
+        date_values = collect_available_dates(npz_files)
+        if not date_values:
+            raise ValueError("No target_date values found in the provided prediction files.")
+    else:
+        if args.date is None:
+            raise ValueError("Provide --date <YYYY-MM-DD> or use --all-dates.")
+        date_values = [args.date]
 
-    records = []
-    for npz_path in npz_files:
-        record = load_prediction_record(
-            npz_path,
-            date_text=args.date,
-            time_index=args.time_index,
-            channel_index=args.channel_index,
-            source_key=args.source_key,
+    for date_text in date_values:
+        output_path = (
+            Path(args.output)
+            if args.output is not None and len(date_values) == 1
+            else default_output_path(input_path, date_text)
         )
-        if record is not None:
-            records.append(record)
+        records = []
+        for npz_path in npz_files:
+            record = load_prediction_record(
+                npz_path,
+                date_text=date_text,
+                time_index=args.time_index,
+                channel_index=args.channel_index,
+                source_key=args.source_key,
+            )
+            if record is not None:
+                records.append(record)
 
-    saved_path = plot_date_records(
-        records,
-        output_path,
-        date_text=args.date,
-        context_pad_lon=args.context_pad_lon,
-        context_pad_lat=args.context_pad_lat,
-        dpi=args.dpi,
-    )
-    print(f"Saved {saved_path}")
+        saved_path = plot_date_records(
+            records,
+            output_path,
+            date_text=date_text,
+            context_pad_lon=args.context_pad_lon,
+            context_pad_lat=args.context_pad_lat,
+            dpi=args.dpi,
+        )
+        print(f"Saved {saved_path}")
 
 
 if __name__ == "__main__":
