@@ -167,7 +167,7 @@ reserved_inputs:
     # Human-readable label for the satellite/platform being reserved.
     # The pipeline also normalizes this string and compares it to values in
     # `track_platforms`, so use the platform name as it appears in the NetCDF.
-    reserved_satellite: Sentinel-6A
+    reserved_satellite: Cryosat-2 New Orbit
     match:
       # Fallback / extra matching tokens.
       # With `method: xarray_platform`, these tokens are compared against the
@@ -176,10 +176,10 @@ reserved_inputs:
       column: vsi_path
       # Case-insensitive tokens for the reserved platform.
       contains:
-        - Sentinel-6A
-        - sentinel-6a
-        - sentinel6a
-        - s6a
+        - Cryosat-2 New Orbit
+        - Cryosat-2
+        - cryosat2
+        - c2n
     # Splits where matching L3 SSH files are removed from the model input stream.
     # Including validation/test avoids leaking the reserved satellite into the
     # model inputs before comparing against it.
