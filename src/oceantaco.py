@@ -787,8 +787,9 @@ def build_dataset(config: Dict[str, Any], split_name: str, reserved_filter_mode:
     if reserved_filter_mode == "configured":
         if split_excludes_reserved_inputs(config, split_name) and _has_file_index_reserved_rules(config):
             apply_reserved_input_filter(dataset, config, split_name, mode="exclude")
-    elif reserved_filter_mode in {"exclude", "only_reserved"} and _has_file_index_reserved_rules(config):
-        apply_reserved_input_filter(dataset, config, split_name, mode=reserved_filter_mode)
+    elif reserved_filter_mode in {"exclude", "only_reserved"}:
+        if _has_file_index_reserved_rules(config):
+            apply_reserved_input_filter(dataset, config, split_name, mode=reserved_filter_mode)
     elif reserved_filter_mode in {None, "none"}:
         pass
     else:
