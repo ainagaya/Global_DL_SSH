@@ -84,13 +84,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--context-pad-lon",
         type=float,
-        default=8.0,
+        default=30.0,
         help="Extra longitude degrees to show around each bbox on the context map.",
     )
     parser.add_argument(
         "--context-pad-lat",
         type=float,
-        default=5.0,
+        default=30.0,
         help="Extra latitude degrees to show around each bbox on the context map.",
     )
     parser.add_argument(
@@ -230,6 +230,7 @@ def import_cartopy():
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
     except ImportError:
+        print("Cartopy not installed")
         return None, None
     return ccrs, cfeature
 
