@@ -140,6 +140,16 @@ Checkpoint and prediction provenance:
   - `input_l4_sst_dataset_status`: `observed`, `missing_from_dataset`, or `degenerate`
   - `input_l4_sst_model_status`: `observed`, `zero_filled_missing`, or `zero_filled_degenerate`
 
+Reserved satellite inputs:
+
+- Configs can define `reserved_inputs.<variable>` rules to hold out one satellite/platform from model inputs.
+- The Gulf Stream config includes a commented, active example for `reserved_inputs.l3_ssh`.
+- The preferred L3 SSH method is `method: xarray_platform`, which opens local `l3_ssh.nc` files with xarray and uses `track_platforms` plus `primary_track` to mask pixels from a selected platform.
+- To inspect available platforms before choosing one, run `python3 inspect_l3_ssh_satellites.py oceantaco_data/OceanTACO/DATA --max-files 5`.
+- Training / validation / test can exclude the reserved satellite via `exclude_from_splits`.
+- Prediction can compare model output against the reserved satellite on selected splits via `metrics_splits`.
+- Reserved test metrics are written as `reserved_l3_ssh_metrics.csv` and `reserved_l3_ssh_metrics_summary.json` in the predictions directory.
+
 This repo contains python code for training and inference workflows for SSH mapping from OceanTACO data.
 
 For a more user-friendly implementation designed for production, please see: https://github.com/smartin98/NeurOST.

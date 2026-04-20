@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import types
 
+import pandas as pd
 import pytest
 import torch
 
@@ -10,6 +11,7 @@ from src.oceantaco import (
     _build_patched_dataset_class,
     _resolve_bbox,
     _split_region_bboxes,
+    apply_reserved_input_filter,
     batch_input_fields,
     batch_to_model_tensors,
     build_queries,
@@ -286,6 +288,74 @@ def test_build_queries_uses_oceantaco_query_generator(base_config, monkeypatch):
     assert calls[0][0] == "train"
     assert calls[0][1]["time_window_days"] == 5
     assert calls[0][1]["bbox_constraint"] == (90.0, 95.0, -5.0, 5.0)
+
+
+def test_apply_reserved_input_filter_removes_matching_training_satellite(base_config):
+    class FakeDataset:
+        pass
+
+    dataset = FakeDataset()
+    dataset._file_index = [
+        pd.DataFrame(
+            {
+                "data_source": ["l3_ssh", "l3_ssh", "l4_sst"],
+                "vsi_path": [
+                    "/data/sentinel-6a/l3_ssh_a.nc",
+                    "/data/jason3/l3_ssh_b.nc",
+                    "/data/sst/l4_sst.nc",
+                ],
+            }
+        )
+    ]
+    base_config["reserved_inputs"] = {
+        "l3_ssh": {
+            "enabled": True,
+            "match": {"column": "vsi_path", "contains": ["sentinel-6a"]},
+            "exclude_from_splits": ["train"],
+        }
+    }
+
+    stats = apply_reserved_input_filter(dataset, base_config, "train", mode="exclude")
+
+    remaining_paths = dataset._file_index[0]["vsi_path"].tolist()
+    assert stats == {"l3_ssh": 1}
+    assert "/data/sentinel-6a/l3_ssh_a.nc" not in remaining_paths
+    assert "/data/jason3/l3_ssh_b.nc" in remaining_paths
+    assert "/data/sst/l4_sst.nc" in remaining_paths
+
+
+def test_apply_reserved_input_filter_can_keep_only_reserved_reference(base_config):
+    class FakeDataset:
+        pass
+
+    dataset = FakeDataset()
+    dataset._file_index = [
+        pd.DataFrame(
+            {
+                "data_source": ["l3_ssh", "l3_ssh", "l3_swot"],
+                "vsi_path": [
+                    "/data/sentinel-6a/l3_ssh_a.nc",
+                    "/data/jason3/l3_ssh_b.nc",
+                    "/data/swot/l3_swot.nc",
+                ],
+            }
+        )
+    ]
+    base_config["reserved_inputs"] = {
+        "l3_ssh": {
+            "enabled": True,
+            "match": {"column": "vsi_path", "contains": ["sentinel-6a"]},
+            "metrics_splits": ["test"],
+        }
+    }
+
+    stats = apply_reserved_input_filter(dataset, base_config, "test", mode="only_reserved")
+
+    remaining_paths = dataset._file_index[0]["vsi_path"].tolist()
+    assert stats == {"l3_ssh": 1}
+    assert "/data/sentinel-6a/l3_ssh_a.nc" in remaining_paths
+    assert "/data/jason3/l3_ssh_b.nc" not in remaining_paths
+    assert "/data/swot/l3_swot.nc" in remaining_paths
 
 
 def test_patched_dataset_retries_transient_load_failures():

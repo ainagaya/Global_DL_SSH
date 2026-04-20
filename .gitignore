@@ -16,6 +16,7 @@ loss_logs/
 predictions/
 mlruns/
 experiments/
+oceantaco_data/
 
 *.pt
 *.pth

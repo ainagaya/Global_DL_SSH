@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from src.config_utils import ensure_dir, load_config
 from src.logging_utils import configure_logging
 from src.mlflow_utils import MLflowTracker
-from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn
+from src.oceantaco import batch_to_model_tensors, build_dataset, get_collate_fn, get_reserved_input_rules
 from src.pytorch_losses import torch_masked_mse
 from src.simvp_model import build_simvp_model_from_config, describe_model_config
 
@@ -113,6 +113,9 @@ def main():
 
     set_seed(int(training_cfg["seed"]))
     LOGGER.info("Loaded training config from %s", config["__config_path__"])
+    reserved_rules = get_reserved_input_rules(config)
+    if reserved_rules:
+        LOGGER.info("Reserved input rules enabled: %s", reserved_rules)
 
     weights_dir = ensure_dir(config["paths"]["weights_dir"], config)
     logs_dir = ensure_dir(config["paths"]["logs_dir"], config)

@@ -1,5 +1,7 @@
 import argparse
 import copy
+import csv
+import json
 import logging
 import sys
 from pathlib import Path
@@ -20,6 +22,7 @@ from src.oceantaco import (
     denormalise_tensor,
     get_collate_fn,
     prediction_records,
+    split_uses_reserved_metrics,
 )
 from src.simvp_model import build_simvp_model_from_config, describe_model_config
 
@@ -209,6 +212,121 @@ def _denormalise_prediction_tensor(
     return torch.stack(channel_tensors, dim=2)
 
 
+class ReservedReferenceMetrics:
+    def __init__(self, variable_name: str):
+        self.variable_name = variable_name
+        self.rows: list[dict[str, object]] = []
+        self.sum_squared_error = 0.0
+        self.sum_absolute_error = 0.0
+        self.sum_prediction = 0.0
+        self.sum_reference = 0.0
+        self.sum_prediction_squared = 0.0
+        self.sum_reference_squared = 0.0
+        self.sum_prediction_reference = 0.0
+        self.count = 0
+
+    def update(self, prediction_2d: np.ndarray, reference_2d: np.ndarray, record: dict[str, object]) -> None:
+        valid_mask = np.isfinite(prediction_2d) & np.isfinite(reference_2d) & (reference_2d != 0.0)
+        valid_count = int(valid_mask.sum())
+        if valid_count == 0:
+            self.rows.append(
+                {
+                    "target_date": record["target_date"],
+                    "bbox": record["bbox"],
+                    "valid_pixels": 0,
+                    "mae": np.nan,
+                    "rmse": np.nan,
+                    "bias": np.nan,
+                }
+            )
+            return
+
+        pred = prediction_2d[valid_mask].astype(np.float64)
+        ref = reference_2d[valid_mask].astype(np.float64)
+        diff = pred - ref
+        squared_error = float(np.sum(diff * diff))
+        absolute_error = float(np.sum(np.abs(diff)))
+
+        self.sum_squared_error += squared_error
+        self.sum_absolute_error += absolute_error
+        self.sum_prediction += float(np.sum(pred))
+        self.sum_reference += float(np.sum(ref))
+        self.sum_prediction_squared += float(np.sum(pred * pred))
+        self.sum_reference_squared += float(np.sum(ref * ref))
+        self.sum_prediction_reference += float(np.sum(pred * ref))
+        self.count += valid_count
+
+        self.rows.append(
+            {
+                "target_date": record["target_date"],
+                "bbox": record["bbox"],
+                "valid_pixels": valid_count,
+                "mae": absolute_error / valid_count,
+                "rmse": float(np.sqrt(squared_error / valid_count)),
+                "bias": float(np.mean(diff)),
+            }
+        )
+
+    def summary(self) -> dict[str, float | int | str]:
+        if self.count == 0:
+            return {
+                "variable": self.variable_name,
+                "valid_pixels": 0,
+                "mae": float("nan"),
+                "rmse": float("nan"),
+                "bias": float("nan"),
+                "correlation": float("nan"),
+            }
+
+        prediction_mean = self.sum_prediction / self.count
+        reference_mean = self.sum_reference / self.count
+        covariance = self.sum_prediction_reference - self.count * prediction_mean * reference_mean
+        prediction_var = self.sum_prediction_squared - self.count * prediction_mean * prediction_mean
+        reference_var = self.sum_reference_squared - self.count * reference_mean * reference_mean
+        denominator = np.sqrt(max(prediction_var, 0.0) * max(reference_var, 0.0))
+        correlation = float(covariance / denominator) if denominator > 0 else float("nan")
+
+        return {
+            "variable": self.variable_name,
+            "valid_pixels": self.count,
+            "mae": self.sum_absolute_error / self.count,
+            "rmse": float(np.sqrt(self.sum_squared_error / self.count)),
+            "bias": (self.sum_prediction - self.sum_reference) / self.count,
+            "correlation": correlation,
+        }
+
+    def write(self, output_dir: Path) -> dict[str, float | int | str]:
+        summary = self.summary()
+        csv_path = output_dir / f"reserved_{self.variable_name}_metrics.csv"
+        json_path = output_dir / f"reserved_{self.variable_name}_metrics_summary.json"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["target_date", "bbox", "valid_pixels", "mae", "rmse", "bias"])
+            writer.writeheader()
+            writer.writerows(self.rows)
+        with json_path.open("w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        LOGGER.info("Saved reserved-reference metrics to %s and %s: %s", csv_path, json_path, summary)
+        return summary
+
+
+def build_reserved_reference_loader(config: dict, split_name: str, prediction_cfg: dict):
+    if not split_uses_reserved_metrics(config, split_name):
+        return None
+
+    reference_dataset = build_dataset(config, split_name, reserved_filter_mode="only_reserved")
+    if len(reference_dataset) == 0:
+        LOGGER.warning("Reserved-reference dataset for split=%s is empty; metrics will be skipped.", split_name)
+        return None
+
+    return DataLoader(
+        reference_dataset,
+        batch_size=int(prediction_cfg["batch_size"]),
+        shuffle=False,
+        num_workers=int(config["training"]["num_workers"]),
+        collate_fn=build_prediction_collate_fn(),
+    )
+
+
 def main():
     args = parse_args()
     runtime_config = load_config(args.config)
@@ -238,6 +356,7 @@ def main():
             num_workers=int(config["training"]["num_workers"]),
             collate_fn=build_prediction_collate_fn(),
         )
+        reserved_reference_loader = build_reserved_reference_loader(config, split_name, prediction_cfg)
 
         output_dir = ensure_dir(config["paths"]["predictions_dir"], config)
         LOGGER.info("Writing predictions to %s", output_dir)
@@ -268,9 +387,15 @@ def main():
         skipped_batches = 0
         zero_input_batches = 0
         skipped_empty_target_samples = 0
+        reserved_metrics = ReservedReferenceMetrics("l3_ssh") if reserved_reference_loader is not None else None
         allow_empty_inputs = bool(prediction_cfg.get("allow_empty_inputs", True))
         with torch.no_grad():
-            for batch_index, batch in enumerate(dataloader):
+            if reserved_reference_loader is None:
+                prediction_iterator = ((batch, None) for batch in dataloader)
+            else:
+                prediction_iterator = zip(dataloader, reserved_reference_loader)
+
+            for batch_index, (batch, reserved_batch) in enumerate(prediction_iterator):
                 present_inputs = [name for name, tensor in batch["inputs"].items() if tensor is not None]
                 missing_inputs = [name for name, tensor in batch["inputs"].items() if tensor is None]
                 has_any_inputs = bool(present_inputs)
@@ -320,6 +445,16 @@ def main():
                 raw_samples = None if raw_samples is None else [
                     sample for sample, keep in zip(raw_samples, valid_target_mask.tolist()) if keep
                 ]
+                reserved_inputs = None
+                if reserved_batch is not None:
+                    reserved_inputs = batch_input_fields(
+                        reserved_batch,
+                        config,
+                        normalise=False,
+                        preserve_missing=True,
+                    )
+                    if reserved_inputs is not None and "l3_ssh" in reserved_inputs:
+                        reserved_inputs["l3_ssh"] = reserved_inputs["l3_ssh"][valid_target_mask]
                 input_tensor_cpu = inputs.cpu()
                 model_inputs = _denormalise_prediction_tensor(
                     input_tensor_cpu,
@@ -388,6 +523,14 @@ def main():
                         time_range=np.array(record["time_range"]),
                         target_date=target_date,
                     )
+                    if reserved_metrics is not None and reserved_inputs is not None and "l3_ssh" in reserved_inputs:
+                        target_index = min(int(config["data"]["target_index"]), predictions.shape[1] - 1)
+                        reserved_reference = reserved_inputs["l3_ssh"][sample_index, target_index].cpu().numpy()
+                        reserved_metrics.update(
+                            predictions[sample_index, target_index, 0],
+                            reserved_reference,
+                            record,
+                        )
                     saved_files += 1
                     if config.get("tracking", {}).get("mlflow", {}).get("log_prediction_artifacts", False):
                         tracker.log_artifact(save_path, artifact_subdir="predictions")
@@ -399,6 +542,20 @@ def main():
                 )
     finally:
         if "saved_files" in locals():
+            reserved_summary = None
+            if reserved_metrics is not None:
+                reserved_summary = reserved_metrics.write(output_dir)
+                if int(reserved_summary["valid_pixels"]) > 0:
+                    reserved_mlflow_metrics = {
+                        "reserved_l3_ssh_mae": float(reserved_summary["mae"]),
+                        "reserved_l3_ssh_rmse": float(reserved_summary["rmse"]),
+                        "reserved_l3_ssh_bias": float(reserved_summary["bias"]),
+                        "reserved_l3_ssh_valid_pixels": float(reserved_summary["valid_pixels"]),
+                    }
+                    correlation = float(reserved_summary["correlation"])
+                    if np.isfinite(correlation):
+                        reserved_mlflow_metrics["reserved_l3_ssh_correlation"] = correlation
+                    tracker.log_metrics(reserved_mlflow_metrics, step=0)
             tracker.log_metrics(
                 {
                     "saved_prediction_files": float(saved_files),

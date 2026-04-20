@@ -149,6 +149,49 @@ data:
         # Whether zeros should be treated as masked / missing values.
         mask_zeros: true
 
+# Optional held-out input-source configuration.
+# This is useful when you want to reserve one satellite/platform from an input
+# data source, prevent the model from seeing that satellite as an input, and
+# later compare model predictions against it as an independent reference.
+reserved_inputs:
+  l3_ssh:
+    # Turn this on to activate the reservation rule below.
+    enabled: true
+    # Preferred implementation.
+    # `xarray_platform` opens each local L3 SSH NetCDF with xarray and uses:
+    # - `track_platforms`: maps each track index to a satellite/platform name
+    # - `primary_track`: tells which track/platform contributed each grid cell
+    # This is better than filtering whole files by filename because one daily
+    # `l3_ssh.nc` can contain multiple satellites at once.
+    method: xarray_platform
+    # Human-readable label for the satellite/platform being reserved.
+    # The pipeline also normalizes this string and compares it to values in
+    # `track_platforms`, so use the platform name as it appears in the NetCDF.
+    reserved_satellite: Sentinel-6A
+    match:
+      # Fallback / extra matching tokens.
+      # With `method: xarray_platform`, these tokens are compared against the
+      # normalized `track_platforms` values in the NetCDF. If you switch to a
+      # file-index method later, the same tokens can also be matched in `vsi_path`.
+      column: vsi_path
+      # Case-insensitive tokens for the reserved platform.
+      contains:
+        - Sentinel-6A
+        - sentinel-6a
+        - sentinel6a
+        - s6a
+    # Splits where matching L3 SSH files are removed from the model input stream.
+    # Including validation/test avoids leaking the reserved satellite into the
+    # model inputs before comparing against it.
+    exclude_from_splits:
+      - train
+      - validation
+      - test
+    # Splits where the reserved satellite is loaded separately and used for
+    # post-prediction metrics against the model output.
+    metrics_splits:
+      - test
+
 # Split definitions for train / validation / test.
 splits:
   train:
@@ -157,7 +200,7 @@ splits:
     # First date included in the training sampling window.
     start_date: 2025-01-15
     # Last date included in the training sampling window.
-    end_date: 2025-03-15
+    end_date: 2025-01-20
     # Number of training queries to generate.
     # Increase this for a more meaningful experiment; keep it small for fast debugging.
     n_queries: 1
@@ -169,12 +212,12 @@ splits:
     strategy: evaluation
     # Validation starts immediately after training ends.
     start_date: 2025-03-16
-    end_date: 2025-03-31
+    end_date: 2025-03-20
     # Override the global query overlap for this split.
     # 0.0 means adjacent validation tiles do not spatially overlap.
     spatial_overlap: 0.0
     # Validation windows are sampled every 4 days.
-    temporal_stride_days: 4
+    temporal_stride_days: 1
     regions:
       - gulf_stream
   test:
@@ -182,11 +225,11 @@ splits:
     strategy: evaluation
     # Held-out test period following validation.
     start_date: 2025-04-01
-    end_date: 2025-04-15
+    end_date: 2025-04-02
     # Non-overlapping test tiles.
     spatial_overlap: 0.0
     # Test windows every 4 days.
-    temporal_stride_days: 4
+    temporal_stride_days: 1
     regions:
       - gulf_stream
 

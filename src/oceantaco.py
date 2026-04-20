@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import re
 import time
 from typing import Any, Dict, List
 
 import pandas as pd
 import torch
+import xarray as xr
 
 from src.config_utils import ensure_dir, get_split_config, resolve_path
 
@@ -20,6 +22,7 @@ DEFAULT_RETRY_ATTEMPTS = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_MULTIPLIER = 2.0
 DEFAULT_RETRY_STATUS_CODES = (429, 500, 502, 503, 504)
+_VSISUBFILE_PATTERN = re.compile(r"/vsisubfile/\d+_\d+,(.+)")
 
 
 def _import_oceantaco():
@@ -181,6 +184,8 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
             retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
             retry_backoff_multiplier: float = DEFAULT_RETRY_BACKOFF_MULTIPLIER,
             retry_status_codes: tuple[int, ...] = DEFAULT_RETRY_STATUS_CODES,
+            reserved_input_rules: Dict[str, Dict[str, Any]] | None = None,
+            reserved_filter_mode: str | None = None,
             **kwargs,
         ):
             super().__init__(*args, **kwargs)
@@ -188,6 +193,8 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
             self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
             self.retry_backoff_multiplier = max(1.0, float(retry_backoff_multiplier))
             self.retry_status_codes = tuple(int(code) for code in retry_status_codes)
+            self.reserved_input_rules = reserved_input_rules or {}
+            self.reserved_filter_mode = reserved_filter_mode
 
         def _sleep_before_retry(self, attempt: int) -> None:
             if self.retry_backoff_seconds <= 0:
@@ -236,7 +243,15 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
                 result = self._load_with_retry("variable load", super()._load_variable, var, file_df, bbox)
                 if result is None:
                     return None
-                return self._postprocess_loaded_variable(var, result)
+                result = self._postprocess_loaded_variable(var, result)
+                return _apply_reserved_platform_mask_to_result(
+                    result,
+                    var=var,
+                    file_df=file_df,
+                    bbox=bbox,
+                    rule=self.reserved_input_rules.get(var),
+                    mode=self.reserved_filter_mode,
+                )
             except (IndexError, ValueError) as exc:
                 LOGGER.warning(
                     "Falling back to defensive _load_variable for var=%s bbox=%s due to %s",
@@ -307,7 +322,7 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
             if data.ndim > 2 and data.shape[0] == 1:
                 data = data.squeeze(0)
 
-            return self._postprocess_loaded_variable(var, {
+            result = self._postprocess_loaded_variable(var, {
                 "data": ocean_dataset_module.torch.from_numpy(data.astype(ocean_dataset_module.np.float32)),
                 "lats": ocean_dataset_module.torch.from_numpy(lats_out.astype(ocean_dataset_module.np.float32))
                 if lats_out is not None
@@ -316,8 +331,174 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
                 if lons_out is not None
                 else None,
             })
+            return _apply_reserved_platform_mask_to_result(
+                result,
+                var=var,
+                file_df=file_df,
+                bbox=bbox,
+                rule=self.reserved_input_rules.get(var),
+                mode=self.reserved_filter_mode,
+            )
 
     return PatchedOceanTACODataset
+
+
+def _normalise_platform_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+
+def _reserved_platform_tokens(rule: Dict[str, Any] | None) -> set[str]:
+    if not rule:
+        return set()
+    tokens = set()
+    for value in _coerce_match_values(rule.get("reserved_satellite")):
+        tokens.add(_normalise_platform_name(value))
+    match_cfg = rule.get("match", {})
+    for value in _coerce_match_values(match_cfg.get("contains")):
+        tokens.add(_normalise_platform_name(value))
+    return {token for token in tokens if token}
+
+
+def _local_path_from_vsi_path(vsi_path: Any) -> Path | None:
+    if vsi_path in (None, ""):
+        return None
+    text = str(vsi_path)
+    match = _VSISUBFILE_PATTERN.match(text)
+    if match:
+        text = match.group(1)
+    if text.startswith("/vsi"):
+        return None
+    path = Path(text)
+    return path if path.exists() else None
+
+
+def _subset_platform_mask(mask, ds: xr.Dataset, bbox: tuple[float, float, float, float]):
+    lon_min, lon_max, lat_min, lat_max = bbox
+    if "lon" in mask.coords:
+        mask = mask.sel(lon=slice(lon_min, lon_max))
+    if "lat" in mask.coords:
+        lat_values = ds["lat"].values
+        lat_slice = slice(lat_min, lat_max) if lat_values[0] <= lat_values[-1] else slice(lat_max, lat_min)
+        mask = mask.sel(lat=lat_slice)
+    return mask
+
+
+def _build_reserved_platform_mask_from_file(
+    nc_path: Path,
+    bbox: tuple[float, float, float, float],
+    platform_tokens: set[str],
+):
+    with xr.open_dataset(nc_path) as ds:
+        required = {"primary_track", "track_platforms"}
+        if not required.issubset(set(ds.variables)):
+            return None
+
+        platforms = [str(value) for value in ds["track_platforms"].values]
+        reserved_track_indices = [
+            index
+            for index, platform in enumerate(platforms)
+            if _normalise_platform_name(platform) in platform_tokens
+        ]
+        if not reserved_track_indices:
+            return None
+
+        primary_track = ds["primary_track"]
+        if "time" in primary_track.dims:
+            primary_track = primary_track.isel(time=0)
+
+        mask = primary_track.isin(reserved_track_indices)
+        return _subset_platform_mask(mask, ds, bbox).astype("float32")
+
+
+def _build_reserved_platform_mask(
+    file_df: pd.DataFrame,
+    bbox: tuple[float, float, float, float],
+    rule: Dict[str, Any],
+    target_shape: tuple[int, int],
+):
+    platform_tokens = _reserved_platform_tokens(rule)
+    if not platform_tokens or file_df is None or file_df.empty:
+        return None
+
+    mask_arrays = []
+    for _, row in file_df.iterrows():
+        if str(row.get("data_source")) != "l3_ssh":
+            continue
+        nc_path = _local_path_from_vsi_path(row.get("vsi_path"))
+        if nc_path is None:
+            continue
+        mask = _build_reserved_platform_mask_from_file(nc_path, bbox, platform_tokens)
+        if mask is not None and mask.size > 0:
+            mask_arrays.append(mask)
+
+    if not mask_arrays:
+        return None
+
+    combined = mask_arrays[0]
+    for mask in mask_arrays[1:]:
+        combined = combined.combine_first(mask)
+        combined = ((combined.fillna(0.0) > 0.0) | (mask.fillna(0.0) > 0.0)).astype("float32")
+
+    target_h, target_w = target_shape
+    mask_tensor = torch.from_numpy(combined.fillna(0.0).values.astype("float32"))
+    if mask_tensor.ndim != 2 or mask_tensor.numel() == 0:
+        return None
+    if tuple(mask_tensor.shape) != (target_h, target_w):
+        mask_tensor = torch.nn.functional.interpolate(
+            mask_tensor.unsqueeze(0).unsqueeze(0),
+            size=(target_h, target_w),
+            mode="nearest",
+        ).squeeze(0).squeeze(0)
+    return mask_tensor.bool()
+
+
+def _apply_reserved_platform_mask_to_result(
+    result,
+    *,
+    var: str,
+    file_df: pd.DataFrame,
+    bbox: tuple[float, float, float, float],
+    rule: Dict[str, Any] | None,
+    mode: str | None,
+):
+    if (
+        result is None
+        or var != "l3_ssh"
+        or not rule
+        or not _rule_uses_xarray_platform_mask(rule)
+        or mode not in {"exclude", "only_reserved"}
+    ):
+        return result
+
+    data = result.get("data")
+    if data is None or data.ndim < 2:
+        return result
+
+    mask = _build_reserved_platform_mask(file_df, bbox, rule, target_shape=tuple(data.shape[-2:]))
+    if mask is None:
+        LOGGER.warning(
+            "Could not build xarray platform mask for reserved %s platform=%s bbox=%s. "
+            "Falling back to unmasked data for this sample.",
+            var,
+            rule.get("reserved_satellite"),
+            bbox,
+        )
+        return result
+
+    output = dict(result)
+    mask = mask.to(data.device if hasattr(data, "device") else "cpu")
+    if data.ndim == 2:
+        expanded_mask = mask
+    else:
+        expanded_mask = mask
+        while expanded_mask.ndim < data.ndim:
+            expanded_mask = expanded_mask.unsqueeze(0)
+
+    if mode == "exclude":
+        output["data"] = torch.where(expanded_mask, torch.zeros_like(data), data)
+    else:
+        output["data"] = torch.where(expanded_mask, data, torch.zeros_like(data))
+    return output
 
 
 def _resolve_bbox(region_spec: Any, config: Dict[str, Any]) -> tuple[float, float, float, float]:
@@ -353,6 +534,136 @@ def _split_region_bboxes(split_cfg: Dict[str, Any], config: Dict[str, Any]) -> L
 def _build_patch_size(config: Dict[str, Any], PatchSize):
     patch_cfg = config["queries"]["patch_size"]
     return PatchSize(float(patch_cfg["value"]), patch_cfg["unit"])
+
+
+def get_reserved_input_rules(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    rules = {}
+    for variable_name, rule in config.get("reserved_inputs", {}).items():
+        if isinstance(rule, dict) and bool(rule.get("enabled", False)):
+            rules[str(variable_name)] = rule
+    return rules
+
+
+def _rule_uses_xarray_platform_mask(rule: Dict[str, Any]) -> bool:
+    return str(rule.get("method", "xarray_platform")).lower() == "xarray_platform"
+
+
+def _has_file_index_reserved_rules(config: Dict[str, Any]) -> bool:
+    return any(not _rule_uses_xarray_platform_mask(rule) for rule in get_reserved_input_rules(config).values())
+
+
+def _split_in_rule(split_name: str, rule: Dict[str, Any], key: str, default: list[str]) -> bool:
+    split_values = rule.get(key, default)
+    if split_values in (None, "all", "ALL"):
+        return True
+    if isinstance(split_values, str):
+        split_values = [split_values]
+    return split_name in {str(value) for value in split_values}
+
+
+def split_excludes_reserved_inputs(config: Dict[str, Any], split_name: str) -> bool:
+    return any(
+        _split_in_rule(split_name, rule, "exclude_from_splits", ["train"])
+        for rule in get_reserved_input_rules(config).values()
+    )
+
+
+def split_uses_reserved_metrics(config: Dict[str, Any], split_name: str) -> bool:
+    return any(
+        _split_in_rule(split_name, rule, "metrics_splits", ["test"])
+        for rule in get_reserved_input_rules(config).values()
+    )
+
+
+def _coerce_match_values(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _match_reserved_rows(file_df: pd.DataFrame, rule: Dict[str, Any]) -> pd.Series:
+    match_cfg = rule.get("match", {})
+    column_name = str(match_cfg.get("column", "vsi_path"))
+    if column_name not in file_df.columns:
+        LOGGER.warning(
+            "Reserved input rule requested column '%s', but available file-index columns are %s. "
+            "No rows will be reserved for this rule.",
+            column_name,
+            sorted(file_df.columns),
+        )
+        return pd.Series(False, index=file_df.index)
+
+    values = file_df[column_name].astype(str)
+    mask = pd.Series(False, index=file_df.index)
+
+    contains_values = _coerce_match_values(match_cfg.get("contains", rule.get("reserved_satellite")))
+    for token in contains_values:
+        mask |= values.str.contains(token, case=False, regex=False, na=False)
+
+    equals_values = _coerce_match_values(match_cfg.get("equals"))
+    if equals_values:
+        mask |= values.str.lower().isin({value.lower() for value in equals_values})
+
+    regex_values = _coerce_match_values(match_cfg.get("regex"))
+    for pattern in regex_values:
+        mask |= values.str.contains(pattern, case=False, regex=True, na=False)
+
+    return mask
+
+
+def _apply_reserved_input_filter_to_file_index(
+    file_index: list[pd.DataFrame],
+    config: Dict[str, Any],
+    split_name: str,
+    mode: str,
+) -> tuple[list[pd.DataFrame], dict[str, int]]:
+    rules = get_reserved_input_rules(config)
+    if not rules:
+        return file_index, {}
+
+    stats: dict[str, int] = {variable_name: 0 for variable_name in rules}
+    filtered_index = []
+    for file_df in file_index:
+        filtered_df = file_df.copy()
+        for variable_name, rule in rules.items():
+            if mode == "exclude" and not _split_in_rule(split_name, rule, "exclude_from_splits", ["train"]):
+                continue
+            if mode == "only_reserved" and not _split_in_rule(split_name, rule, "metrics_splits", ["test"]):
+                continue
+            if "data_source" not in filtered_df.columns:
+                continue
+
+            variable_mask = filtered_df["data_source"].astype(str) == variable_name
+            reserved_mask = variable_mask & _match_reserved_rows(filtered_df, rule)
+            stats[variable_name] += int(reserved_mask.sum())
+
+            if mode == "exclude":
+                filtered_df = filtered_df.loc[~reserved_mask].copy()
+            elif mode == "only_reserved":
+                filtered_df = filtered_df.loc[(~variable_mask) | reserved_mask].copy()
+            else:
+                raise ValueError(f"Unsupported reserved input filter mode: {mode}")
+        filtered_index.append(filtered_df)
+
+    return filtered_index, stats
+
+
+def apply_reserved_input_filter(dataset, config: Dict[str, Any], split_name: str, mode: str = "exclude") -> dict[str, int]:
+    if not hasattr(dataset, "_file_index"):
+        LOGGER.warning("Dataset does not expose _file_index; cannot apply reserved input filtering.")
+        return {}
+
+    filtered_index, stats = _apply_reserved_input_filter_to_file_index(
+        getattr(dataset, "_file_index"),
+        config,
+        split_name,
+        mode,
+    )
+    dataset._file_index = filtered_index
+    LOGGER.info("Applied reserved input filter mode=%s split=%s stats=%s", mode, split_name, stats)
+    return stats
 
 
 def build_queries(config: Dict[str, Any], split_name: str):
@@ -436,7 +747,7 @@ def build_queries(config: Dict[str, Any], split_name: str):
     return queries
 
 
-def build_dataset(config: Dict[str, Any], split_name: str):
+def build_dataset(config: Dict[str, Any], split_name: str, reserved_filter_mode: str = "configured"):
     OceanTACODataset, _, _, _, HF_DEFAULT_URL, ocean_dataset_module = _import_oceantaco()
     data_cfg = config["data"]
     grid_cfg = data_cfg["grid"]
@@ -466,7 +777,22 @@ def build_dataset(config: Dict[str, Any], split_name: str):
         retry_backoff_seconds=retry_cfg.get("backoff_seconds", DEFAULT_RETRY_BACKOFF_SECONDS),
         retry_backoff_multiplier=retry_cfg.get("backoff_multiplier", DEFAULT_RETRY_BACKOFF_MULTIPLIER),
         retry_status_codes=tuple(retry_cfg.get("status_codes", DEFAULT_RETRY_STATUS_CODES)),
+        reserved_input_rules=get_reserved_input_rules(config),
+        reserved_filter_mode=(
+            "exclude"
+            if reserved_filter_mode == "configured" and split_excludes_reserved_inputs(config, split_name)
+            else reserved_filter_mode
+        ),
     )
+    if reserved_filter_mode == "configured":
+        if split_excludes_reserved_inputs(config, split_name) and _has_file_index_reserved_rules(config):
+            apply_reserved_input_filter(dataset, config, split_name, mode="exclude")
+    elif reserved_filter_mode in {"exclude", "only_reserved"} and _has_file_index_reserved_rules(config):
+        apply_reserved_input_filter(dataset, config, split_name, mode=reserved_filter_mode)
+    elif reserved_filter_mode in {None, "none"}:
+        pass
+    else:
+        raise ValueError(f"Unsupported reserved_filter_mode={reserved_filter_mode}")
     LOGGER.info("Dataset ready for split=%s with %s samples", split_name, len(dataset))
     return dataset
 

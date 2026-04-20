@@ -119,6 +119,55 @@ Implementation:
 - Outputs a PNG with train and validation losses
 
 
+### Reserved satellite input holdout
+
+Decision:
+
+- Add a config-driven way to reserve one satellite/platform from an input
+  variable, initially for `l3_ssh`.
+
+Why:
+
+- The user wanted to hold out one L3 SSH satellite from training and use it as
+  an independent comparison source after test prediction.
+
+Implementation:
+
+- Added `reserved_inputs` support in `src/oceantaco.py`
+- Added `inspect_l3_ssh_satellites.py` to list available L3 SSH platforms
+  directly from downloaded NetCDF files using xarray
+- The Gulf Stream config now includes:
+  - `reserved_inputs.l3_ssh.enabled`
+  - `reserved_inputs.l3_ssh.method: xarray_platform`
+  - `reserved_inputs.l3_ssh.reserved_satellite`
+  - `reserved_inputs.l3_ssh.match`
+  - `exclude_from_splits`
+  - `metrics_splits`
+- Dataset filtering is applied to OceanTACO's per-query `_file_index`.
+- For L3 SSH, the preferred reservation uses xarray to inspect `track_platforms`
+  and `primary_track` inside each local `l3_ssh.nc`. This allows pixel-level
+  masking of one satellite/platform even when one daily file contains multiple
+  satellites.
+- File-index / `vsi_path` matching remains useful as a fallback, but is less
+  precise than xarray platform masking.
+- Training logs enabled reserved-input rules.
+- Prediction builds a parallel reserved-reference dataset for configured metric
+  splits and compares predictions against held-out `l3_ssh`.
+
+Outputs:
+
+- `reserved_l3_ssh_metrics.csv`
+- `reserved_l3_ssh_metrics_summary.json`
+
+Metrics:
+
+- MAE
+- RMSE
+- bias
+- correlation
+- valid pixel count
+
+
 ### Model selection is now config-driven
 
 Decision:
