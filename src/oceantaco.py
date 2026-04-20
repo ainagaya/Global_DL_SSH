@@ -498,6 +498,14 @@ def _apply_reserved_platform_mask_to_result(
         output["data"] = torch.where(expanded_mask, torch.zeros_like(data), data)
     else:
         output["data"] = torch.where(expanded_mask, data, torch.zeros_like(data))
+    LOGGER.info(
+        "Applied xarray reserved-platform mask var=%s satellite=%s mode=%s masked_pixels=%s bbox=%s",
+        var,
+        rule.get("reserved_satellite", "<unspecified>"),
+        mode,
+        int(mask.sum().item()),
+        bbox,
+    )
     return output
 
 
@@ -550,6 +558,26 @@ def _rule_uses_xarray_platform_mask(rule: Dict[str, Any]) -> bool:
 
 def _has_file_index_reserved_rules(config: Dict[str, Any]) -> bool:
     return any(not _rule_uses_xarray_platform_mask(rule) for rule in get_reserved_input_rules(config).values())
+
+
+def _log_reserved_input_rules(config: Dict[str, Any], split_name: str, mode: str | None) -> None:
+    for variable_name, rule in get_reserved_input_rules(config).items():
+        effective_mode = mode
+        if effective_mode == "configured":
+            effective_mode = "exclude" if _split_in_rule(split_name, rule, "exclude_from_splits", ["train"]) else "none"
+        if effective_mode not in {"exclude", "only_reserved"}:
+            continue
+
+        action = "excluding from model inputs" if effective_mode == "exclude" else "isolating as reserved reference"
+        LOGGER.info(
+            "Reserved input active for split=%s variable=%s satellite=%s method=%s mode=%s action=%s",
+            split_name,
+            variable_name,
+            rule.get("reserved_satellite", "<unspecified>"),
+            rule.get("method", "xarray_platform"),
+            effective_mode,
+            action,
+        )
 
 
 def _split_in_rule(split_name: str, rule: Dict[str, Any], key: str, default: list[str]) -> bool:
@@ -754,6 +782,7 @@ def build_dataset(config: Dict[str, Any], split_name: str, reserved_filter_mode:
 
     taco_path = resolve_oceantaco_path(config, HF_DEFAULT_URL)
     queries = build_queries(config, split_name)
+    _log_reserved_input_rules(config, split_name, reserved_filter_mode)
     LOGGER.info(
         "Creating OceanTACO dataset for split=%s with %s queries, %s inputs, %s targets, grid=%sx%s",
         split_name,
