@@ -225,11 +225,11 @@ splits:
     strategy: evaluation
     # Held-out test period following validation.
     start_date: 2025-04-01
-    end_date: 2025-04-02
+    end_date: 2025-04-15
     # Non-overlapping test tiles.
     spatial_overlap: 0.0
     # Test windows every 4 days.
-    temporal_stride_days: 1
+    temporal_stride_days: 4
     regions:
       - gulf_stream
 
