@@ -225,6 +225,28 @@ def compute_value_limits(*arrays: np.ndarray) -> tuple[float, float]:
     return float(combined.min()), float(combined.max())
 
 
+def source_uses_ssh_scale(source_name: str) -> bool:
+    return "ssh" in source_name.lower()
+
+
+def compute_panel_limits(records: list[PredictionRecord]) -> tuple[tuple[float, float], dict[str, tuple[float, float]]]:
+    prediction_target_arrays = [array for record in records for array in (record.prediction, record.target)]
+    value_limits = compute_value_limits(*prediction_target_arrays)
+
+    source_arrays_by_name: dict[str, list[np.ndarray]] = {}
+    for record in records:
+        source_arrays_by_name.setdefault(record.source_name, []).append(record.source)
+
+    source_limits: dict[str, tuple[float, float]] = {}
+    for source_name, source_arrays in source_arrays_by_name.items():
+        if source_uses_ssh_scale(source_name):
+            source_limits[source_name] = value_limits
+        else:
+            source_limits[source_name] = compute_value_limits(*source_arrays)
+
+    return value_limits, source_limits
+
+
 def import_cartopy():
     try:
         import cartopy.crs as ccrs
@@ -319,14 +341,14 @@ def plot_date_records(
     ccrs, cfeature = import_cartopy()
     use_cartopy = ccrs is not None and cfeature is not None
     sorted_records = sort_records(records)
+    (value_min, value_max), source_limits = compute_panel_limits(sorted_records)
 
     row_count = len(sorted_records)
     fig = plt.figure(figsize=(18, 4.6 * row_count), constrained_layout=True)
     subplot_spec = fig.add_gridspec(row_count, 4, width_ratios=[1.1, 1.0, 1.0, 1.0])
 
     for row_index, record in enumerate(sorted_records):
-        value_min, value_max = compute_value_limits(record.prediction, record.target)
-        source_min, source_max = compute_value_limits(record.source)
+        source_min, source_max = source_limits[record.source_name]
 
         if use_cartopy:
             context_axis = fig.add_subplot(subplot_spec[row_index, 0], projection=ccrs.PlateCarree())
