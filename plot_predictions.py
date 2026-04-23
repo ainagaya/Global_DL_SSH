@@ -7,6 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plot_prediction_regions import masked_prediction_difference
+
 
 # This script is intended for fast visual debugging of prediction outputs saved by
 # `simvp_predict_ssh.py`. Each `.npz` file stores:
@@ -178,7 +180,7 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
 
     prediction_2d = select_2d_slice(prediction, time_index=time_index, channel_index=channel_index)
     target_2d = select_2d_slice(target, time_index=time_index, channel_index=channel_index)
-    diff_2d = prediction_2d - target_2d
+    diff_2d = masked_prediction_difference(prediction_2d, target_2d)
     input_l3_ssh_2d = (
         select_2d_slice(input_l3_ssh, time_index=time_index, channel_index=channel_index) if input_l3_ssh is not None else None
     )

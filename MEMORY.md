@@ -130,6 +130,14 @@ Usage:
 - `python3 plot_prediction_mosaics.py predictions --date 2025-03-21`
 - `python3 plot_prediction_mosaics.py predictions --all-dates --alpha 0.5`
 
+Follow-up:
+
+- Difference panels now mask missing SWOT target pixels before computing
+  `prediction - target`.
+- A valid SWOT target pixel is finite and nonzero; target `NaN` and `0.0`
+  become `NaN` in the difference field and are ignored by difference color
+  limits.
+
 
 ### Training-curve plotter
 

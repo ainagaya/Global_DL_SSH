@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from plot_prediction_regions import PredictionRecord, compute_panel_limits
+from plot_prediction_regions import PredictionRecord, compute_panel_limits, masked_prediction_difference
 
 
 def make_record(*, name: str, prediction: np.ndarray, target: np.ndarray, source: np.ndarray) -> PredictionRecord:
@@ -61,3 +61,14 @@ def test_compute_panel_limits_keeps_non_ssh_source_scale_shared_by_source_name()
 
     assert value_limits == (-2.0, 6.0)
     assert source_limits["input_l4_sst"] == (10.0, 25.0)
+
+
+def test_masked_prediction_difference_discards_missing_swot_targets():
+    prediction = np.array([[10.0, 20.0, 30.0, 40.0]], dtype=np.float32)
+    target = np.array([[1.0, 0.0, np.nan, -2.0]], dtype=np.float32)
+
+    diff = masked_prediction_difference(prediction, target)
+
+    assert np.allclose(diff[0, [0, 3]], np.array([9.0, 42.0], dtype=np.float32))
+    assert np.isnan(diff[0, 1])
+    assert np.isnan(diff[0, 2])

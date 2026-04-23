@@ -24,15 +24,15 @@ def test_compute_mosaic_extent_wraps_all_record_bboxes():
 def test_compute_mosaic_limits_uses_symmetric_difference_scale():
     records = [
         _make_record(
-            prediction=np.array([[3.0, 5.0]], dtype=np.float32),
-            target=np.array([[1.0, 10.0]], dtype=np.float32),
+            prediction=np.array([[3.0, 5.0, 100.0, 100.0]], dtype=np.float32),
+            target=np.array([[1.0, 10.0, 0.0, np.nan]], dtype=np.float32),
         )
     ]
 
     limits = compute_mosaic_limits(records)
 
-    assert limits["prediction"] == (1.0, 10.0)
-    assert limits["target"] == (1.0, 10.0)
+    assert limits["prediction"] == (0.0, 100.0)
+    assert limits["target"] == (0.0, 100.0)
     assert limits["diff"] == (-5.0, 5.0)
 
 

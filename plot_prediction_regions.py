@@ -225,6 +225,14 @@ def compute_value_limits(*arrays: np.ndarray) -> tuple[float, float]:
     return float(combined.min()), float(combined.max())
 
 
+def valid_swot_target_mask(target: np.ndarray) -> np.ndarray:
+    return np.isfinite(target) & (target != 0.0)
+
+
+def masked_prediction_difference(prediction: np.ndarray, target: np.ndarray) -> np.ndarray:
+    return np.where(valid_swot_target_mask(target), prediction - target, np.nan)
+
+
 def source_uses_ssh_scale(source_name: str) -> bool:
     return "ssh" in source_name.lower()
 
