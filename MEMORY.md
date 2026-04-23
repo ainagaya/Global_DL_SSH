@@ -56,9 +56,12 @@ Implementation:
   - writes a frozen runtime config to `experiments/<id>/<id>_runtime_config.yaml`
   - rewrites output paths so weights, logs, predictions, queries, and mlflow data land inside the experiment directory
   - sets `training.checkpoint_name` to the experiment id
+  - runs `download_oceantaco_local.py --config <runtime_config>` before training
   - launches `simvp_ddp_training.py --config <runtime_config>`
   - then launches `simvp_predict_ssh.py` with the latest checkpoint from that experiment
-  - then generates training-curve and region-level prediction plots in `experiments/<id>/analysis/`
+  - then generates all available plots in `experiments/<id>/analysis/`:
+    training curves, per-file prediction panels, regional date summaries, and
+    merged date mosaics
 
 Related repo changes:
 

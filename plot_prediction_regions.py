@@ -70,6 +70,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional output PNG path. Defaults to <input>/regional_plots/<date>.png.",
     )
     parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory for generated PNGs. Defaults to <input>/regional_plots.",
+    )
+    parser.add_argument(
         "--time-index",
         type=int,
         default=0,
@@ -122,8 +127,10 @@ def resolve_npz_files(input_path: Path) -> list[Path]:
     return files
 
 
-def default_output_path(input_path: Path, date_text: str) -> Path:
-    if input_path.is_file():
+def default_output_path(input_path: Path, date_text: str, output_dir_arg: str | None = None) -> Path:
+    if output_dir_arg is not None:
+        output_dir = Path(output_dir_arg)
+    elif input_path.is_file():
         output_dir = input_path.parent / "regional_plots"
     else:
         output_dir = input_path / "regional_plots"
@@ -436,6 +443,9 @@ def main() -> None:
     args = parse_args()
     input_path = Path(args.input_path)
     npz_files = resolve_npz_files(input_path)
+    if args.output is not None and args.all_dates:
+        raise ValueError("--output can only be used when plotting a single date.")
+
     if args.all_dates:
         date_values = collect_available_dates(npz_files)
         if not date_values:
@@ -448,8 +458,8 @@ def main() -> None:
     for date_text in date_values:
         output_path = (
             Path(args.output)
-            if args.output is not None and len(date_values) == 1
-            else default_output_path(input_path, date_text)
+            if args.output is not None
+            else default_output_path(input_path, date_text, args.output_dir)
         )
         records = []
         for npz_path in npz_files:

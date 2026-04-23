@@ -4,7 +4,12 @@ from pathlib import Path
 
 import numpy as np
 
-from plot_prediction_regions import PredictionRecord, compute_panel_limits, masked_prediction_squared_error
+from plot_prediction_regions import (
+    PredictionRecord,
+    compute_panel_limits,
+    default_output_path,
+    masked_prediction_squared_error,
+)
 
 
 def make_record(*, name: str, prediction: np.ndarray, target: np.ndarray, source: np.ndarray) -> PredictionRecord:
@@ -72,3 +77,10 @@ def test_masked_prediction_squared_error_discards_missing_swot_targets():
     assert np.allclose(squared_error[0, [0, 3]], np.array([81.0, 1764.0], dtype=np.float32))
     assert np.isnan(squared_error[0, 1])
     assert np.isnan(squared_error[0, 2])
+
+
+def test_default_output_path_honors_output_dir(tmp_path):
+    output_path = default_output_path(tmp_path / "predictions", "2025-05-02", str(tmp_path / "analysis"))
+
+    assert output_path == tmp_path / "analysis" / "prediction_regions_2025-05-02.png"
+    assert output_path.parent.exists()

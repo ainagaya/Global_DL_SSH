@@ -69,10 +69,11 @@ The launcher will:
 - record the current git commit
 - copy the base config into the experiment folder
 - write a frozen runtime config with experiment-specific output paths
+- download the OceanTACO files required by the configured splits
 - run training
 - run inference with the latest checkpoint from that experiment
 - plot the training curves from the loss CSV
-- generate regional prediction plots for all available prediction dates
+- generate per-file, regional, and merged mosaic prediction plots for all available prediction dates
 - store weights, logs, predictions, queries, MLflow artifacts, and analysis plots inside that experiment directory
 
 Run inference with:
