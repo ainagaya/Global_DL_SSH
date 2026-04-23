@@ -101,6 +101,35 @@ Usage:
 - `python3 plot_prediction_regions.py predictions --date 2025-03-21 --source-key input_l4_sst`
 - `python3 plot_prediction_regions.py predictions --all-dates`
 
+### Merged prediction mosaic plotting
+
+Decision:
+
+- Add a second geography-aware plotter for merged date-level views rather than
+  extending the row-per-region summary script.
+
+Why:
+
+- The user wanted each date plotted as a merged lon/lat canvas, placing each
+  prediction area according to its bbox coordinates and using transparency for
+  overlapping areas.
+
+Implementation:
+
+- Added `plot_prediction_mosaics.py`
+- Accepts a single `.npz` file or directory
+- Supports `--date` and `--all-dates`
+- Produces one figure per target date with source, prediction, target, and
+  prediction-minus-target panels
+- Draws every matching patch at its lon/lat extent using configurable `--alpha`
+- Uses Cartopy coastlines/land when available and falls back to plain
+  Matplotlib axes otherwise
+
+Usage:
+
+- `python3 plot_prediction_mosaics.py predictions --date 2025-03-21`
+- `python3 plot_prediction_mosaics.py predictions --all-dates --alpha 0.5`
+
 
 ### Training-curve plotter
 

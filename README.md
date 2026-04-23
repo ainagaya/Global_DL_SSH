@@ -108,6 +108,17 @@ contains a wider context map around the bbox, the selected bbox outline, and
 the source, prediction, and target fields for that date. If `cartopy` is
 installed, coastlines and land are added automatically.
 
+To merge all prediction regions into one shared lon/lat canvas per date, use:
+
+```bash
+python3 plot_prediction_mosaics.py predictions --date 2025-03-21
+python3 plot_prediction_mosaics.py predictions --all-dates --alpha 0.5
+```
+
+This creates one mosaic figure per target date with source, prediction, target,
+and prediction-minus-target panels. Overlapping patches are drawn with
+transparency so repeated coverage remains visible.
+
 To plot training curves manually, use:
 
 ```bash
