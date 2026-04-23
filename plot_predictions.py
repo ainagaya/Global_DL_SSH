@@ -7,7 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from plot_prediction_regions import masked_prediction_difference
+from plot_prediction_regions import masked_prediction_squared_error
 
 
 # This script is intended for fast visual debugging of prediction outputs saved by
@@ -131,14 +131,6 @@ def compute_limits(field_2d: np.ndarray) -> tuple[float, float]:
     return float(finite.min()), float(finite.max())
 
 
-def compute_symmetric_limit(diff_2d: np.ndarray) -> float:
-    finite = diff_2d[np.isfinite(diff_2d)]
-    if finite.size == 0:
-        return 1.0
-    max_abs = float(np.max(np.abs(finite)))
-    return max(max_abs, 1e-6)
-
-
 def format_title(npz_path: Path, bbox: np.ndarray | None, time_range: np.ndarray | None, target_date: str | None) -> str:
     parts = [npz_path.name]
     if target_date:
@@ -180,7 +172,7 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
 
     prediction_2d = select_2d_slice(prediction, time_index=time_index, channel_index=channel_index)
     target_2d = select_2d_slice(target, time_index=time_index, channel_index=channel_index)
-    diff_2d = masked_prediction_difference(prediction_2d, target_2d)
+    squared_error_2d = masked_prediction_squared_error(prediction_2d, target_2d)
     input_l3_ssh_2d = (
         select_2d_slice(input_l3_ssh, time_index=time_index, channel_index=channel_index) if input_l3_ssh is not None else None
     )
@@ -189,7 +181,7 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
     )
 
     value_min, value_max = compute_common_limits(prediction_2d, target_2d)
-    diff_limit = compute_symmetric_limit(diff_2d)
+    error_min, error_max = compute_limits(squared_error_2d)
     sst_min, sst_max = compute_limits(input_l4_sst_2d) if input_l4_sst_2d is not None else (None, None)
     ssh_missing = is_missing_field(input_l3_ssh_2d, input_l3_ssh_present)
     sst_missing = is_missing_field(input_l4_sst_2d, input_l4_sst_present)
@@ -204,7 +196,7 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
     panel_specs = [
         ("Prediction", prediction_2d, "viridis", value_min, value_max),
         ("Target", target_2d, "viridis", value_min, value_max),
-        ("Prediction - Target", diff_2d, "coolwarm", -diff_limit, diff_limit),
+        ("Squared Error", squared_error_2d, "magma", error_min, error_max),
     ]
     if input_l3_ssh_2d is not None:
         panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", value_min, value_max, ssh_missing))

@@ -116,8 +116,8 @@ python3 plot_prediction_mosaics.py predictions --all-dates --alpha 0.5
 ```
 
 This creates one mosaic figure per target date with source, prediction, target,
-and prediction-minus-target panels. Overlapping patches are drawn with
-transparency so repeated coverage remains visible.
+and squared-error panels. Overlapping patches are drawn with transparency so
+repeated coverage remains visible.
 
 To plot training curves manually, use:
 

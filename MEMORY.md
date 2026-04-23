@@ -120,7 +120,7 @@ Implementation:
 - Accepts a single `.npz` file or directory
 - Supports `--date` and `--all-dates`
 - Produces one figure per target date with source, prediction, target, and
-  prediction-minus-target panels
+  squared-error panels
 - Draws every matching patch at its lon/lat extent using configurable `--alpha`
 - Uses Cartopy coastlines/land when available and falls back to plain
   Matplotlib axes otherwise
@@ -132,10 +132,10 @@ Usage:
 
 Follow-up:
 
-- Difference panels now mask missing SWOT target pixels before computing
-  `prediction - target`.
+- Squared-error panels now mask missing SWOT target pixels before computing
+  `(prediction - target) ** 2`.
 - A valid SWOT target pixel is finite and nonzero; target `NaN` and `0.0`
-  become `NaN` in the difference field and are ignored by difference color
+  become `NaN` in the squared-error field and are ignored by error color
   limits.
 
 
@@ -541,7 +541,7 @@ Implementation:
 - It plots:
   - prediction
   - target
-  - prediction minus target
+  - squared error
 - It supports:
   - `--time-index`
   - `--channel-index`
@@ -849,14 +849,14 @@ What it plots:
 
 - prediction field
 - target field
-- prediction minus target
+- squared error
 
 Behavior:
 
 - accepts a file or directory
 - writes `.png` outputs
 - uses a shared color scale for prediction and target
-- uses a symmetric color scale for the error map
+- masks target `NaN` and zero values out of the squared-error map
 - uses bbox as geographic extent if present
 - selects slices with `--time-index` and `--channel-index`
 

@@ -21,7 +21,7 @@ def test_compute_mosaic_extent_wraps_all_record_bboxes():
     assert extent == (-0.5, 4.0, 9.0, 14.0)
 
 
-def test_compute_mosaic_limits_uses_symmetric_difference_scale():
+def test_compute_mosaic_limits_uses_valid_swot_squared_error_scale():
     records = [
         _make_record(
             prediction=np.array([[3.0, 5.0, 100.0, 100.0]], dtype=np.float32),
@@ -33,7 +33,7 @@ def test_compute_mosaic_limits_uses_symmetric_difference_scale():
 
     assert limits["prediction"] == (0.0, 100.0)
     assert limits["target"] == (0.0, 100.0)
-    assert limits["diff"] == (-5.0, 5.0)
+    assert limits["squared_error"] == (4.0, 25.0)
 
 
 def test_plot_date_mosaic_overlays_overlapping_prediction_files(tmp_path):

@@ -12,7 +12,7 @@ from plot_prediction_regions import (
     choose_source_key,
     collect_available_dates,
     compute_value_limits,
-    masked_prediction_difference,
+    masked_prediction_squared_error,
     resolve_npz_files,
     select_2d_slice,
     source_uses_ssh_scale,
@@ -188,15 +188,14 @@ def compute_mosaic_limits(records: list[PredictionRecord]) -> dict[str, tuple[fl
     else:
         source_limits = compute_value_limits(*source_arrays)
 
-    diff_arrays = [masked_prediction_difference(record.prediction, record.target) for record in records]
-    diff_min, diff_max = compute_value_limits(*diff_arrays)
-    diff_abs = max(abs(diff_min), abs(diff_max), 1e-6)
+    squared_error_arrays = [masked_prediction_squared_error(record.prediction, record.target) for record in records]
+    squared_error_limits = compute_value_limits(*squared_error_arrays)
 
     return {
         "source": source_limits,
         "prediction": prediction_limits,
         "target": prediction_limits,
-        "diff": (-diff_abs, diff_abs),
+        "squared_error": squared_error_limits,
     }
 
 
@@ -246,8 +245,8 @@ def overlay_field(
             field = record.prediction
         elif field_name == "target":
             field = record.target
-        elif field_name == "diff":
-            field = masked_prediction_difference(record.prediction, record.target)
+        elif field_name == "squared_error":
+            field = masked_prediction_squared_error(record.prediction, record.target)
         else:
             raise ValueError(f"Unknown field name: {field_name}")
 
@@ -295,7 +294,7 @@ def plot_date_mosaic(
         ("source", f"Source: {', '.join(sorted({record.source_name for record in records}))}", "viridis"),
         ("prediction", "Prediction", "viridis"),
         ("target", "Target", "viridis"),
-        ("diff", "Prediction - Target", "coolwarm"),
+        ("squared_error", "Squared Error", "magma"),
     ]
 
     for axis, (field_name, title, cmap_name) in zip(axes.ravel(), panel_specs):
