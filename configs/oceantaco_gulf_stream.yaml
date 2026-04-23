@@ -103,10 +103,10 @@ queries:
 data:
   # Number of temporal frames given to the model for each sample.
   # The code pads or trims loaded sequences to this length.
-  sequence_length: 5
+  sequence_length: 3
   # Which temporal index inside the sequence is treated as the primary target date.
   # With sequence_length=5, target_index=2 means "the middle frame".
-  target_index: 2
+  target_index: 1
   # Temporal aggregation mode used by the adapter.
   # `stack` means keep the sequence as T separate frames instead of collapsing over time.
   temporal_agg: stack
@@ -229,7 +229,7 @@ splits:
     # Non-overlapping test tiles.
     spatial_overlap: 0.0
     # Test windows every 4 days.
-    temporal_stride_days: 4
+    temporal_stride_days: 1
     regions:
       - gulf_stream
 
