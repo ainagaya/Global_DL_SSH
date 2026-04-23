@@ -69,7 +69,7 @@ regions:
   gulf_stream:
     # Small Gulf Stream box used for this experiment.
     # This should cover a coherent dynamic region while keeping the run affordable.
-    bbox: [-65.0, -60.0, 30.0, 35.0]
+    bbox: [-70.0, -60.0, 30.0, 40.0]
 
 # Query-generation settings used to build OceanTACO samples.
 queries:
@@ -203,7 +203,7 @@ splits:
     end_date: 2025-09-01
     # Number of training queries to generate.
     # Increase this for a more meaningful experiment; keep it small for fast debugging.
-    n_queries: 128
+    n_queries: 256
     # Named regions used for this split.
     regions:
       - gulf_stream
