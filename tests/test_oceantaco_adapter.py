@@ -451,3 +451,24 @@ def test_patched_dataset_preserves_successful_upstream_load_shape():
     result = dataset._load_variable("l4_sst", None, (0.0, 1.0, 2.0, 3.0))
 
     assert result["data"].shape == (1, 2, 2)
+
+
+def test_patched_dataset_repairs_double_converted_l4_sst():
+    class FakeBaseDataset:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def _load_variable(self, var, file_df, bbox):
+            return {
+                "data": torch.tensor([[[-253.15, 0.0], [-252.15, -251.15]]]),
+                "lats": None,
+                "lons": None,
+            }
+
+    fake_dataset_module = types.SimpleNamespace()
+    dataset_cls = _build_patched_dataset_class(FakeBaseDataset, fake_dataset_module)
+    dataset = dataset_cls(retry_attempts=1, retry_backoff_seconds=0.0)
+
+    result = dataset._load_variable("l4_sst", None, (0.0, 1.0, 2.0, 3.0))
+
+    assert torch.allclose(result["data"], torch.tensor([[[20.0, 0.0], [21.0, 22.0]]]))

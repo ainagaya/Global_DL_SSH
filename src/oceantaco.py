@@ -105,6 +105,26 @@ def _is_mergeable_grid(data) -> bool:
     return getattr(data, "ndim", 0) >= 2 and all(dim > 0 for dim in data.shape[-2:])
 
 
+def _repair_double_converted_sst(var: str, data):
+    if var != "l4_sst" or data is None or not torch.is_tensor(data):
+        return data
+
+    finite = data[torch.isfinite(data)]
+    if finite.numel() == 0:
+        return data
+
+    # Some OceanTACO l4_sst files decode from NetCDF directly into Celsius, but
+    # the upstream loader still subtracts 273.15. Ocean SST below -100 C is a
+    # strong signal that this double conversion happened. Missing pixels may
+    # already be zero-filled by the upstream loader, so repair only the
+    # physically impossible negative pixels.
+    if float(finite.min().item()) < -100.0:
+        repaired = data.clone()
+        repaired[repaired < -100.0] += 273.15
+        return repaired
+    return data
+
+
 def _extract_status_code(exc: Exception) -> int | None:
     response = getattr(exc, "response", None)
     if response is not None:
@@ -235,7 +255,7 @@ def _build_patched_dataset_class(base_cls, ocean_dataset_module):
                 return result
 
             updated = dict(result)
-            updated["data"] = data
+            updated["data"] = _repair_double_converted_sst(var, data)
             return updated
 
         def _load_variable(self, var, file_df, bbox):
