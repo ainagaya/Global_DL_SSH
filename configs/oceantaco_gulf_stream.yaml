@@ -126,18 +126,15 @@ data:
         std: 0.0986
         # Whether zeros should be treated as masked / missing values during normalization logic.
         mask_zeros: true
-    # # Second model input: L4 SST.
-    # - key: l4_sst
-    #   normalize:
-    #     # Mean used to normalize SST values.
-    #     mean: 20.157
-    #     # Standard deviation used to normalize SST values.
-    #     std: 8.726
-    #     # Minimum physically valid SST.
-    #     # Values below this threshold are treated as invalid / masked.
-    #     min_valid: -5.0
-    #     # Whether zeros should be treated as masked / missing values.
-    #     mask_zeros: true
+    # Second model input: L4 SST.
+    - key: l3_swot
+      normalize:
+        # Mean used to normalize the target field.
+        mean: 0.074
+        # Standard deviation used to normalize the target field.
+        std: 0.0986
+        # Whether zeros should be treated as masked / missing values.
+        mask_zeros: true
   targets:
     # Prediction target: SWOT SSH.
     - key: l4_ssh
