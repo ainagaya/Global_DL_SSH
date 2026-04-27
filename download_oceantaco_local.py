@@ -163,7 +163,7 @@ def determine_metadata_files(repo_id: str, revision: str, data_files: list[str])
 
 def download_repo_file(repo_id: str, revision: str, repo_path: str, destination_root: Path, force: bool) -> Path:
     target_path = destination_root / repo_path
-    if target_path.exists() and not force:
+    if target_path.is_file() and not force:
         return target_path
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +192,19 @@ def download_repo_file(repo_id: str, revision: str, repo_path: str, destination_
     return Path(downloaded_path)
 
 
+def partition_repo_files_by_local_presence(
+    repo_files: Iterable[str], destination_root: Path, force: bool
+) -> tuple[list[str], list[str]]:
+    existing_files = []
+    missing_files = []
+    for repo_path in repo_files:
+        if not force and (destination_root / repo_path).is_file():
+            existing_files.append(repo_path)
+        else:
+            missing_files.append(repo_path)
+    return existing_files, missing_files
+
+
 def write_download_manifest(
     destination_root: Path,
     *,
@@ -199,7 +212,9 @@ def write_download_manifest(
     splits: list[str],
     repo_id: str,
     revision: str,
+    selected_files: list[str],
     downloaded_files: list[str],
+    skipped_existing_files: list[str],
 ) -> Path:
     manifest_path = destination_root / "download_manifest.json"
     payload = {
@@ -207,7 +222,12 @@ def write_download_manifest(
         "repo_id": repo_id,
         "revision": revision,
         "splits": splits,
+        "selected_file_count": len(selected_files),
+        "downloaded_file_count": len(downloaded_files),
+        "skipped_existing_file_count": len(skipped_existing_files),
+        "selected_files": selected_files,
         "downloaded_files": downloaded_files,
+        "skipped_existing_files": skipped_existing_files,
     }
     manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return manifest_path
@@ -262,28 +282,41 @@ def main() -> None:
     required_data_files = collect_required_data_files(dataset._file_index, ocean_dataset_module.COL_VSI)
     metadata_files = determine_metadata_files(repo_id, revision, required_data_files)
     repo_files = sorted(set(metadata_files) | set(required_data_files))
+    existing_files, files_to_download = partition_repo_files_by_local_presence(
+        repo_files,
+        destination_root,
+        force=args.force,
+    )
 
     LOGGER.info(
-        "OceanTACO local mirror target=%s repo=%s revision=%s splits=%s queries=%s files=%s",
+        "OceanTACO local mirror target=%s repo=%s revision=%s splits=%s queries=%s files=%s existing=%s to_download=%s force=%s",
         destination_root,
         repo_id,
         revision,
         split_names,
         len(all_queries),
         len(repo_files),
+        len(existing_files),
+        len(files_to_download),
+        args.force,
     )
+    if existing_files:
+        LOGGER.info("Skipping %s already existing OceanTACO files", len(existing_files))
 
     if args.dry_run:
-        for repo_path in repo_files:
+        for repo_path in files_to_download:
             print(repo_path)
         return
 
     downloaded_files = []
-    for index, repo_path in enumerate(repo_files, start=1):
+    if not files_to_download:
+        LOGGER.info("All selected OceanTACO files already exist locally; nothing to download.")
+
+    for index, repo_path in enumerate(files_to_download, start=1):
         download_repo_file(repo_id, revision, repo_path, destination_root, force=args.force)
         downloaded_files.append(repo_path)
-        if index == 1 or index == len(repo_files) or index % 25 == 0:
-            LOGGER.info("Downloaded %s/%s OceanTACO files", index, len(repo_files))
+        if index == 1 or index == len(files_to_download) or index % 25 == 0:
+            LOGGER.info("Downloaded %s/%s missing OceanTACO files", index, len(files_to_download))
 
     manifest_path = write_download_manifest(
         destination_root,
@@ -291,7 +324,9 @@ def main() -> None:
         splits=split_names,
         repo_id=repo_id,
         revision=revision,
+        selected_files=repo_files,
         downloaded_files=downloaded_files,
+        skipped_existing_files=existing_files,
     )
     LOGGER.info("Wrote OceanTACO download manifest to %s", manifest_path)
 
