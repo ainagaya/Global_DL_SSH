@@ -1,0 +1,295 @@
+# Output locations used by the training / prediction scripts.
+# These are relative to the repository root unless absolute paths are given.
+paths:
+  # Directory where training checkpoints (`*.pt`) will be written.
+  weights_dir: ./model_weights
+  # Directory where the CSV loss log will be written.
+  logs_dir: ./loss_logs
+  # Directory where prediction `.npz` files will be saved.
+  predictions_dir: ./predictions
+  # Directory where generated OceanTACO query files will be stored.
+  queries_dir: ./queries
+
+# Standard Python logging configuration for console output.
+logging:
+  # Logging verbosity.
+  # Common values: DEBUG, INFO, WARNING, ERROR.
+  # INFO is a good default for long runs because it shows progress without being too noisy.
+  level: INFO
+
+# Experiment tracking options.
+tracking:
+  mlflow:
+    # Whether MLflow logging is enabled at all.
+    # If false, all MLflow-specific settings below are ignored.
+    enabled: false
+    # Where MLflow stores runs.
+    # Local path example: ./mlruns
+    # Database example: sqlite:///mlflow.db
+    tracking_uri: ./mlruns
+    # MLflow experiment name shown in the tracking UI.
+    experiment_name: Global_DL_SSH
+    # Optional explicit run name.
+    # Leave empty to let MLflow / the launcher choose.
+    run_name:
+    # Optional extra run tags stored by MLflow.
+    tags: {}
+    # Whether the flattened YAML config is logged as MLflow parameters.
+    log_params: true
+    # Whether the config file itself is logged as an MLflow artifact.
+    log_config_artifact: true
+    # Whether training checkpoints are uploaded to MLflow artifacts.
+    log_checkpoints: true
+    # Whether the CSV loss log is uploaded to MLflow artifacts.
+    log_loss_csv: true
+    # Whether prediction `.npz` files are uploaded to MLflow artifacts.
+    # Usually false because these artifacts can become large quickly.
+    log_prediction_artifacts: false
+
+# OceanTACO dataset access settings.
+oceantaco:
+  # Optional direct path or remote URI to the OceanTACO dataset root.
+  # Leave empty to let the code fall back to OceanTACO's documented default source.
+  taco_path:
+  # Optional local mirror location used by `download_oceantaco_local.py`.
+  # If this directory exists, the pipeline prefers it over remote access.
+  download_path: ./oceantaco_data/OceanTACO
+  # Hugging Face dataset repository id used when mirroring / resolving the dataset.
+  hf_repo_id: nilsleh/OceanTACO
+  # Dataset revision, branch, or tag.
+  revision: main
+
+# Named geographic presets.
+# Splits can reference one or more of these by name, or use `global`.
+regions:
+  global:
+    # Bounding box order is:
+    # [lon_min, lon_max, lat_min, lat_max]
+    bbox: [-180.0, 180.0, -60.0, 60.0]
+  gulf_stream:
+    # Small Gulf Stream box used for this experiment.
+    # This should cover a coherent dynamic region while keeping the run affordable.
+    bbox: [-70.0, -60.0, 30.0, 40.0]
+
+# Query-generation settings used to build OceanTACO samples.
+queries:
+  patch_size:
+    # Spatial width/height of each sampled patch.
+    # Larger patches give more context but also more heterogeneous scenes and heavier downloads.
+    value: 3.0
+    # Unit for patch size.
+    # OceanTACO supports geographic units; here we sample 3-degree patches.
+    unit: deg
+  # Optional path to a land mask file used by OceanTACO query generation.
+  # Leave empty to disable custom land-mask filtering.
+  land_mask_path:
+  # Maximum allowed land fraction inside a patch.
+  # Lower values keep mostly-ocean tiles; higher values allow more coastal patches.
+  max_land_fraction: 0.5
+  # Maximum allowed overlap between sampled training patches when generating random queries.
+  # This helps avoid oversampling nearly identical scenes.
+  max_spatial_overlap: 0.75
+  # Oversampling factor used during training-query generation.
+  # Higher values give the query generator more candidate patches before filtering.
+  oversample_factor: 2.5
+  # Default spatial overlap used for evaluation-style grids unless overridden per split.
+  spatial_overlap: 0.25
+  # Default time stride, in days, between evaluation query windows unless overridden per split.
+  temporal_stride_days: 1
+  # Whether OceanTACO query generation should print verbose progress messages.
+  verbose: false
+
+# Data formatting and normalization choices before tensors are passed to the model.
+data:
+  # Number of temporal frames given to the model for each sample.
+  # The code pads or trims loaded sequences to this length.
+  sequence_length: 3
+  # Which temporal index inside the sequence is treated as the primary target date.
+  # With sequence_length=5, target_index=2 means "the middle frame".
+  target_index: 1
+  # Temporal aggregation mode used by the adapter.
+  # `stack` means keep the sequence as T separate frames instead of collapsing over time.
+  temporal_agg: stack
+  grid:
+    # Output grid height after interpolation / resampling.
+    # Higher values preserve more spatial detail but increase compute and memory cost.
+    height: 96
+    # Output grid width after interpolation / resampling.
+    width: 96
+  inputs:
+    # First model input: L3 SSH.
+    - key: l3_ssh
+      normalize:
+        # Mean used to normalize this variable.
+        mean: 0.074
+        # Standard deviation used to normalize this variable.
+        std: 0.0986
+        # Whether zeros should be treated as masked / missing values during normalization logic.
+        mask_zeros: true
+    # Second model input: L4 SST.
+    - key: l3_swot
+      normalize:
+        # Mean used to normalize the target field.
+        mean: 0.074
+        # Standard deviation used to normalize the target field.
+        std: 0.0986
+        # Whether zeros should be treated as masked / missing values.
+        mask_zeros: true
+  targets:
+    # Prediction target: SWOT SSH.
+    - key: l4_ssh
+      normalize:
+        # Mean used to normalize the target field.
+        mean: 0.074
+        # Standard deviation used to normalize the target field.
+        std: 0.0986
+        # Whether zeros should be treated as masked / missing values.
+        mask_zeros: true
+
+# Optional held-out input-source configuration.
+# This is useful when you want to reserve one satellite/platform from an input
+# data source, prevent the model from seeing that satellite as an input, and
+# later compare model predictions against it as an independent reference.
+reserved_inputs:
+  l3_ssh:
+    # Turn this on to activate the reservation rule below.
+    enabled: true
+    # Preferred implementation.
+    # `xarray_platform` opens each local L3 SSH NetCDF with xarray and uses:
+    # - `track_platforms`: maps each track index to a satellite/platform name
+    # - `primary_track`: tells which track/platform contributed each grid cell
+    # This is better than filtering whole files by filename because one daily
+    # `l3_ssh.nc` can contain multiple satellites at once.
+    method: xarray_platform
+    # Human-readable label for the satellite/platform being reserved.
+    # The pipeline also normalizes this string and compares it to values in
+    # `track_platforms`, so use the platform name as it appears in the NetCDF.
+    reserved_satellite: Cryosat-2 New Orbit
+    match:
+      # Fallback / extra matching tokens.
+      # With `method: xarray_platform`, these tokens are compared against the
+      # normalized `track_platforms` values in the NetCDF. If you switch to a
+      # file-index method later, the same tokens can also be matched in `vsi_path`.
+      column: vsi_path
+      # Case-insensitive tokens for the reserved platform.
+      contains:
+        - Cryosat-2 New Orbit
+        - Cryosat-2
+        - cryosat2
+        - c2n
+    # Splits where matching L3 SSH files are removed from the model input stream.
+    # Including validation/test avoids leaking the reserved satellite into the
+    # model inputs before comparing against it.
+    exclude_from_splits:
+      - train
+      - validation
+      - test
+    # Splits where the reserved satellite is loaded separately and used for
+    # post-prediction metrics against the model output.
+    metrics_splits:
+      - test
+
+# Split definitions for train / validation / test.
+splits:
+  train:
+    # `training` means randomly sampled training queries.
+    strategy: training
+    # First date included in the training sampling window.
+    start_date: 2023-03-29
+    # Last date included in the training sampling window.
+    end_date: 2025-01-01
+    # Number of training queries to generate.
+    # Increase this for a more meaningful experiment; keep it small for fast debugging.
+    n_queries: 512
+    # Named regions used for this split.
+    regions:
+      - gulf_stream
+  validation:
+    # `evaluation` means grid-style deterministic queries across space and time.
+    strategy: evaluation
+    # Validation starts immediately after training ends.
+    start_date: 2025-01-12
+    end_date: 2025-09-01
+    # Override the global query overlap for this split.
+    # 0.0 means adjacent validation tiles do not spatially overlap.
+    spatial_overlap: 0.0
+    # Validation windows are sampled every 4 days.
+    temporal_stride_days: 2
+    regions:
+      - gulf_stream
+  test:
+    # Test also uses deterministic evaluation-style queries.
+    strategy: evaluation
+    # Held-out test period following validation.
+    start_date: 2024-04-01
+    end_date: 2024-04-15
+    # Non-overlapping test tiles.
+    spatial_overlap: 0.0
+    # Test windows every 4 days.
+    temporal_stride_days: 2
+    regions:
+      - gulf_stream
+
+# Model architecture settings.
+model:
+  # Which high-level SimVP wrapper to instantiate.
+  # Options currently supported by the code:
+  # - no_skip_configurable
+  # - no_skip
+  # - no_skip_sst
+  variant: no_skip_configurable
+  # Hidden translator family used inside SimVP.
+  # Common options include:
+  # gsta, convnext, convmixer, hornet, mlpmixer, moga, poolformer,
+  # swin, uniformer, van, vit, tau, incepu
+  type: gsta
+  # Number of hidden spatial channels in the encoder/decoder.
+  hidden_spatial: 8
+  # Number of hidden channels in the temporal translator.
+  hidden_temporal: 64
+  # Depth of the spatial encoder/decoder stack.
+  spatial_depth: 3
+  # Depth of the temporal translator.
+  temporal_depth: 3
+  # Standard dropout applied inside supported blocks.
+  drop: 0.1
+  # Stochastic depth / drop-path rate for supported blocks.
+  drop_path: 0.05
+
+# Training runtime settings.
+training:
+  # Number of samples per optimization step.
+  batch_size: 2
+  # Number of worker processes for the PyTorch DataLoader.
+  # 0 is safest for debugging; larger values can improve throughput.
+  num_workers: 0
+  # Whether to enable DataLoader pinned memory.
+  # Usually helpful on CUDA systems.
+  pin_memory: true
+  # Number of batches prefetched per DataLoader worker.
+  # Only relevant when num_workers > 0.
+  prefetch_factor: 2
+  # Run validation every N epochs instead of every epoch.
+  validation_every_epochs: 3
+  # Optimizer learning rate.
+  learning_rate: 0.001
+  # Total number of training epochs.
+  epochs: 15
+  # Whether to enable automatic mixed precision when running on CUDA.
+  amp: true
+  # Whether training batches are shuffled.
+  shuffle: true
+  # Random seed for Python, NumPy, and PyTorch.
+  seed: 42
+  # Base name used when writing checkpoints and loss logs.
+  checkpoint_name: simvp_oceantaco_gulf_stream_2025
+
+# Prediction / inference settings.
+prediction:
+  # Which split to run inference on by default.
+  split: test
+  # Batch size used during prediction.
+  batch_size: 1
+  # If true, prediction is still allowed when all input observations are missing;
+  # the pipeline then uses zero-filled fallback tensors.
+  allow_empty_inputs: true
