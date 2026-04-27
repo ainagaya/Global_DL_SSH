@@ -198,12 +198,12 @@ splits:
     # `training` means randomly sampled training queries.
     strategy: training
     # First date included in the training sampling window.
-    start_date: 2024-09-01
+    start_date: 2023-03-29
     # Last date included in the training sampling window.
-    end_date: 2025-09-01
+    end_date: 2025-01-01
     # Number of training queries to generate.
     # Increase this for a more meaningful experiment; keep it small for fast debugging.
-    n_queries: 256
+    n_queries: 512
     # Named regions used for this split.
     regions:
       - gulf_stream
@@ -211,13 +211,13 @@ splits:
     # `evaluation` means grid-style deterministic queries across space and time.
     strategy: evaluation
     # Validation starts immediately after training ends.
-    start_date: 2024-03-16
-    end_date: 2024-03-20
+    start_date: 2025-01-12
+    end_date: 2025-09-01
     # Override the global query overlap for this split.
     # 0.0 means adjacent validation tiles do not spatially overlap.
     spatial_overlap: 0.0
     # Validation windows are sampled every 4 days.
-    temporal_stride_days: 4
+    temporal_stride_days: 2
     regions:
       - gulf_stream
   test:
@@ -229,7 +229,7 @@ splits:
     # Non-overlapping test tiles.
     spatial_overlap: 0.0
     # Test windows every 4 days.
-    temporal_stride_days: 1
+    temporal_stride_days: 2
     regions:
       - gulf_stream
 
