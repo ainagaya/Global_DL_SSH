@@ -140,7 +140,7 @@ data:
         mask_zeros: true
   targets:
     # Prediction target: SWOT SSH.
-    - key: l3_swot
+    - key: l4_ssh
       normalize:
         # Mean used to normalize the target field.
         mean: 0.074
