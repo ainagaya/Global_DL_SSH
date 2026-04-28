@@ -144,6 +144,7 @@ if [[ -n "$RESUME_ID" ]]; then
     exit 1
   fi
   EXPERIMENT_ID="$RESUME_ID"
+  echo "Resuming experiment with id: $EXPERIMENT_ID"
 else
   EXPERIMENT_ID="$(next_experiment_id "$EXPERIMENTS_ROOT")"
 fi
