@@ -26,7 +26,18 @@ LOGGER = logging.getLogger(__name__)
 class LossLogger:
     def __init__(self, filename: Path):
         self.filename = filename
-        self.rows = []
+        self.rows = self._load_existing_rows()
+
+    def _load_existing_rows(self):
+        if not self.filename.exists():
+            return []
+
+        rows = []
+        with self.filename.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                rows.append((int(row["epoch"]), float(row["train_loss"]), float(row["val_loss"])))
+        return rows
 
     def log(self, epoch: int, train_loss: float, val_loss: float) -> None:
         self.rows.append((epoch, train_loss, val_loss))

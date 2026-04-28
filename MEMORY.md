@@ -978,15 +978,29 @@ Regional 2025 experiment config for the Gulf Stream.
 Characteristics:
 
 - Gulf Stream bbox in the western North Atlantic:
-  `[-80.0, -50.0, 30.0, 45.0]`
+  `[-65.0, -60.0, 30.0, 35.0]`
 - `2025` train / validation / test splits
 - `3.0 deg` patch size
 - `96x96` grid
-- `5`-frame sequences with center target index
-- moderate query count for training (`64`)
+- `3`-frame sequences with target index `1`
+- moderate query count for training (`128`)
 - mid-sized model compared to the smoke test
 - `15` epochs for a more meaningful result than a smoke run
 - `prediction.allow_empty_inputs: true`
+
+### Additional regional OceanTACO configs
+
+Added sibling configs based on the Gulf Stream template for four more current
+systems:
+
+- `configs/oceantaco_kuroshio_current.yaml`
+- `configs/oceantaco_brazil_current.yaml`
+- `configs/oceantaco_agulhas.yaml`
+- `configs/oceantaco_east_australia.yaml`
+
+These keep the same training, model, reserved-input, and prediction settings as
+the Gulf Stream config and only swap the regional preset names, regional bboxes,
+and checkpoint names so they can be compared more easily.
 
 
 ## .gitignore decisions

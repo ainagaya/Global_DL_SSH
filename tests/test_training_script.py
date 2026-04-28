@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import sys
 import types
 
@@ -124,3 +125,21 @@ def test_mlflow_tracker_logs_config_artifact(monkeypatch, base_config):
     logged_path, logged_subdir = tracker._mlflow.logged_artifacts[0]
     assert logged_path == str(base_config["__config_path__"])
     assert logged_subdir == "config"
+
+
+def test_loss_logger_preserves_existing_rows_when_resuming(tmp_path):
+    loss_csv = tmp_path / "losses.csv"
+
+    logger = training_script.LossLogger(loss_csv)
+    logger.log(0, 1.5, 2.5)
+    logger.log(1, 1.0, 2.0)
+
+    resumed_logger = training_script.LossLogger(loss_csv)
+    resumed_logger.log(2, 0.5, 1.5)
+
+    with loss_csv.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert [int(row["epoch"]) for row in rows] == [0, 1, 2]
+    assert [float(row["train_loss"]) for row in rows] == [1.5, 1.0, 0.5]
+    assert [float(row["val_loss"]) for row in rows] == [2.5, 2.0, 1.5]

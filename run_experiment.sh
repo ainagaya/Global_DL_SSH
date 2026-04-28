@@ -17,10 +17,12 @@ usage() {
   cat <<'EOF'
 Usage:
   ./run_experiment.sh <base-config.yaml> [additional training args...]
+  ./run_experiment.sh --resume=aXXX [additional training args...]
 
 Example:
   ./run_experiment.sh configs/oceantaco_smoke_test.yaml
   ./run_experiment.sh configs/oceantaco_gulf_stream.yaml
+  ./run_experiment.sh --resume=a002
 EOF
 }
 
@@ -52,18 +54,82 @@ next_experiment_id() {
   printf "a%03d" "$((last_id + 1))"
 }
 
+latest_experiment_checkpoint() {
+  local weights_dir="$1"
+  local checkpoint_name="$2"
+
+  ls -1 "$weights_dir"/"${checkpoint_name}"_epoch*.pt 2>/dev/null | sort -V | tail -n 1
+}
+
+RESUME_ID=""
+BASE_CONFIG=""
+TRAINING_ARGS=()
+EXPECT_RESUME_VALUE=0
+
 if [[ $# -lt 1 ]]; then
   usage
   exit 1
 fi
 
-BASE_CONFIG="$1"
-shift
+for arg in "$@"; do
+  if (( EXPECT_RESUME_VALUE )); then
+    RESUME_ID="$arg"
+    EXPECT_RESUME_VALUE=0
+    continue
+  fi
 
-if [[ ! -f "$BASE_CONFIG" ]]; then
-  echo "Config file not found: $BASE_CONFIG" >&2
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --resume=*)
+      if [[ -n "$RESUME_ID" ]]; then
+        echo "--resume can only be provided once." >&2
+        exit 1
+      fi
+      RESUME_ID="${arg#--resume=}"
+      ;;
+    --resume)
+      if [[ -n "$RESUME_ID" ]]; then
+        echo "--resume can only be provided once." >&2
+        exit 1
+      fi
+      EXPECT_RESUME_VALUE=1
+      ;;
+    *)
+      if [[ -z "$BASE_CONFIG" && -z "$RESUME_ID" && "$arg" != -* ]]; then
+        BASE_CONFIG="$arg"
+      else
+        TRAINING_ARGS+=("$arg")
+      fi
+      ;;
+  esac
+done
+
+if (( EXPECT_RESUME_VALUE )); then
+  echo "--resume requires an experiment id, for example --resume=a002." >&2
   exit 1
 fi
+
+if [[ -n "$BASE_CONFIG" && -n "$RESUME_ID" ]]; then
+  echo "Choose either a new base config or --resume=aXXX, not both." >&2
+  exit 1
+fi
+
+if [[ -z "$BASE_CONFIG" && -z "$RESUME_ID" ]]; then
+  usage
+  exit 1
+fi
+
+for arg in "${TRAINING_ARGS[@]}"; do
+  case "$arg" in
+    --config|--config=*|--checkpoint|--checkpoint=*)
+      echo "run_experiment.sh manages --config and --checkpoint internally; remove $arg." >&2
+      exit 1
+      ;;
+  esac
+done
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -71,7 +137,17 @@ cd "$REPO_ROOT"
 require_clean_git_tree
 
 EXPERIMENTS_ROOT="$REPO_ROOT/experiments"
-EXPERIMENT_ID="$(next_experiment_id "$EXPERIMENTS_ROOT")"
+
+if [[ -n "$RESUME_ID" ]]; then
+  if [[ ! "$RESUME_ID" =~ ^a[0-9]{3}$ ]]; then
+    echo "Invalid experiment id for --resume: $RESUME_ID" >&2
+    exit 1
+  fi
+  EXPERIMENT_ID="$RESUME_ID"
+else
+  EXPERIMENT_ID="$(next_experiment_id "$EXPERIMENTS_ROOT")"
+fi
+
 EXPERIMENT_DIR="$EXPERIMENTS_ROOT/$EXPERIMENT_ID"
 WEIGHTS_DIR="$EXPERIMENT_DIR/weights"
 LOGS_DIR="$EXPERIMENT_DIR/logs"
@@ -85,6 +161,22 @@ MOSAIC_PLOTS_DIR="$ANALYSIS_DIR/prediction_mosaics"
 METADATA_FILE="$EXPERIMENT_DIR/${EXPERIMENT_ID}_metadata.txt"
 BASE_CONFIG_COPY="$EXPERIMENT_DIR/${EXPERIMENT_ID}_base_config.yaml"
 RUNTIME_CONFIG="$EXPERIMENT_DIR/${EXPERIMENT_ID}_runtime_config.yaml"
+
+if [[ -n "$RESUME_ID" ]]; then
+  if [[ ! -d "$EXPERIMENT_DIR" ]]; then
+    echo "Experiment directory not found for --resume=$RESUME_ID: $EXPERIMENT_DIR" >&2
+    exit 1
+  fi
+  if [[ ! -f "$RUNTIME_CONFIG" ]]; then
+    echo "Runtime config not found for --resume=$RESUME_ID: $RUNTIME_CONFIG" >&2
+    exit 1
+  fi
+else
+  if [[ ! -f "$BASE_CONFIG" ]]; then
+    echo "Config file not found: $BASE_CONFIG" >&2
+    exit 1
+  fi
+fi
 
 mkdir -p \
   "$WEIGHTS_DIR" \
@@ -101,11 +193,14 @@ GIT_COMMIT="$(git rev-parse HEAD)"
 GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 CREATED_AT_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-cp "$BASE_CONFIG" "$BASE_CONFIG_COPY"
+if [[ -z "$RESUME_ID" ]]; then
+  cp "$BASE_CONFIG" "$BASE_CONFIG_COPY"
+fi
 
 # We rewrite the runtime config instead of mutating the source config so the
 # experiment remains self-contained and reproducible even if the original YAML
 # changes later on.
+if [[ -z "$RESUME_ID" ]]; then
 python3 - "$BASE_CONFIG" "$RUNTIME_CONFIG" "$EXPERIMENT_ID" "$EXPERIMENT_DIR" "$GIT_COMMIT" "$CREATED_AT_UTC" "$MLRUNS_DIR" <<'PY'
 from __future__ import annotations
 
@@ -148,7 +243,9 @@ config["experiment"] = {
 with runtime_config_path.open("w", encoding="utf-8") as handle:
     yaml.safe_dump(config, handle, sort_keys=False)
 PY
+fi
 
+if [[ -z "$RESUME_ID" ]]; then
 cat > "$METADATA_FILE" <<EOF
 experiment_id: $EXPERIMENT_ID
 git_commit: $GIT_COMMIT
@@ -159,18 +256,35 @@ base_config_copy: $BASE_CONFIG_COPY
 runtime_config: $RUNTIME_CONFIG
 experiment_dir: $EXPERIMENT_DIR
 EOF
+fi
 
-echo "Created experiment $EXPERIMENT_ID"
+if [[ -n "$RESUME_ID" ]]; then
+  RESUME_CHECKPOINT="$(latest_experiment_checkpoint "$WEIGHTS_DIR" "$EXPERIMENT_ID")"
+  if [[ -z "$RESUME_CHECKPOINT" ]]; then
+    echo "No checkpoint found to resume in $WEIGHTS_DIR" >&2
+    exit 1
+  fi
+  echo "Resuming experiment $EXPERIMENT_ID"
+  echo "Resume checkpoint: $RESUME_CHECKPOINT"
+else
+  RESUME_CHECKPOINT=""
+  echo "Created experiment $EXPERIMENT_ID"
+fi
+
 echo "Commit: $GIT_COMMIT"
 echo "Experiment directory: $EXPERIMENT_DIR"
 echo "Frozen runtime config: $RUNTIME_CONFIG"
 echo "Downloading required OceanTACO data..."
-python3 download_oceantaco_local.py --config "$RUNTIME_CONFIG" 2>&1 | tee "$EXPERIMENT_DIR/logs/download.log"
+python3 download_oceantaco_local.py --config "$RUNTIME_CONFIG" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/download.log"
 
 echo "Launching training..."
-python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "$@" 2>&1 | tee "$EXPERIMENT_DIR/logs/training.log"
+if [[ -n "$RESUME_CHECKPOINT" ]]; then
+  python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" --checkpoint "$RESUME_CHECKPOINT" "${TRAINING_ARGS[@]}" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/training.log"
+else
+  python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "${TRAINING_ARGS[@]}" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/training.log"
+fi
 
-LATEST_CHECKPOINT="$(ls -1 "$WEIGHTS_DIR"/"${EXPERIMENT_ID}"_epoch*.pt 2>/dev/null | sort -V | tail -n 1)"
+LATEST_CHECKPOINT="$(latest_experiment_checkpoint "$WEIGHTS_DIR" "$EXPERIMENT_ID")"
 if [[ -z "$LATEST_CHECKPOINT" ]]; then
   echo "No checkpoint was produced in $WEIGHTS_DIR" >&2
   exit 1
@@ -180,7 +294,7 @@ LOSS_CSV="$LOGS_DIR/${EXPERIMENT_ID}_losses.csv"
 LOSS_PLOT="$ANALYSIS_DIR/${EXPERIMENT_ID}_losses.png"
 
 echo "Launching inference with checkpoint: $LATEST_CHECKPOINT"
-python3 simvp_predict_ssh.py --config "$RUNTIME_CONFIG" --checkpoint "$LATEST_CHECKPOINT" 2>&1 | tee "$EXPERIMENT_DIR/logs/prediction.log"
+python3 simvp_predict_ssh.py --config "$RUNTIME_CONFIG" --checkpoint "$LATEST_CHECKPOINT" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/prediction.log"
 
 if [[ -f "$LOSS_CSV" ]]; then
   echo "Plotting training curves from $LOSS_CSV"
