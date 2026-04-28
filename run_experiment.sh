@@ -161,6 +161,7 @@ MOSAIC_PLOTS_DIR="$ANALYSIS_DIR/prediction_mosaics"
 METADATA_FILE="$EXPERIMENT_DIR/${EXPERIMENT_ID}_metadata.txt"
 BASE_CONFIG_COPY="$EXPERIMENT_DIR/${EXPERIMENT_ID}_base_config.yaml"
 RUNTIME_CONFIG="$EXPERIMENT_DIR/${EXPERIMENT_ID}_runtime_config.yaml"
+EXPERIMENTS_MD="$REPO_ROOT/EXPERIMENTS.md"
 
 if [[ -n "$RESUME_ID" ]]; then
   if [[ ! -d "$EXPERIMENT_DIR" ]]; then
@@ -271,6 +272,49 @@ else
   echo "Created experiment $EXPERIMENT_ID"
 fi
 
+append_experiments_md_start() {
+  if [[ ! -f "$EXPERIMENTS_MD" ]]; then
+    return
+  fi
+
+  cat >> "$EXPERIMENTS_MD" <<EOF
+
+### $EXPERIMENT_ID
+
+- Created: $CREATED_AT_UTC
+- Git: \`$GIT_COMMIT\` on branch \`$GIT_BRANCH\`
+- Base config: \`$(realpath "$BASE_CONFIG")\`
+- Experiment dir: \`experiments/$EXPERIMENT_ID\`
+- Status: started by \`run_experiment.sh\`; results pending.
+- Scientific note: fill in after training and prediction complete.
+EOF
+}
+
+append_experiments_md_finish() {
+  if [[ ! -f "$EXPERIMENTS_MD" ]]; then
+    return
+  fi
+
+  local finished_at_utc
+  local prediction_count
+  finished_at_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  prediction_count="$(find "$PREDICTIONS_DIR" -maxdepth 1 -type f -name '*.npz' | wc -l | tr -d ' ')"
+
+  cat >> "$EXPERIMENTS_MD" <<EOF
+- Completed: $finished_at_utc
+- Outputs: latest checkpoint \`experiments/$EXPERIMENT_ID/weights/$(basename "$LATEST_CHECKPOINT")\`, loss CSV \`experiments/$EXPERIMENT_ID/logs/${EXPERIMENT_ID}_losses.csv\`, prediction files: $prediction_count
+EOF
+
+  if [[ -f "$PREDICTIONS_DIR/reserved_l3_ssh_metrics_summary.json" ]]; then
+    echo "- Metrics: \`experiments/$EXPERIMENT_ID/predictions/reserved_l3_ssh_metrics_summary.json\`" >> "$EXPERIMENTS_MD"
+  fi
+
+  echo "- Follow-up: replace this generated ledger note with a short result interpretation." >> "$EXPERIMENTS_MD"
+}
+
+append_experiments_md_start
+
+echo "Created experiment $EXPERIMENT_ID"
 echo "Commit: $GIT_COMMIT"
 echo "Experiment directory: $EXPERIMENT_DIR"
 echo "Frozen runtime config: $RUNTIME_CONFIG"
@@ -317,6 +361,7 @@ else
 fi
 
 echo "Experiment $EXPERIMENT_ID finished"
+append_experiments_md_finish
 echo "Artifacts:"
 echo "  weights: $WEIGHTS_DIR"
 echo "  logs: $LOGS_DIR"
