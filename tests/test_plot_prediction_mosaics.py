@@ -36,6 +36,17 @@ def test_compute_mosaic_limits_uses_valid_swot_squared_error_scale():
     assert limits["squared_error"] == (4.0, 25.0)
 
 
+def test_compute_mosaic_limits_ignores_sst_zero_padding():
+    records = [
+        _make_record(sst=np.array([[0.0, 18.0], [19.0, 0.0]], dtype=np.float32)),
+        _make_record(sst=np.array([[22.0, 0.0], [24.0, np.nan]], dtype=np.float32)),
+    ]
+
+    limits = compute_mosaic_limits(records)
+
+    assert limits["sst"] == (18.0, 24.0)
+
+
 def test_plot_date_mosaic_overlays_overlapping_prediction_files(tmp_path):
     prediction_dir = tmp_path / "predictions"
     prediction_dir.mkdir()
@@ -68,6 +79,7 @@ def _make_record(
     bbox: tuple[float, float, float, float] = (0.0, 1.0, 2.0, 3.0),
     prediction: np.ndarray | None = None,
     target: np.ndarray | None = None,
+    sst: np.ndarray | None = None,
 ):
     from pathlib import Path
 
@@ -85,17 +97,22 @@ def _make_record(
         target=target,
         source_name="input_l3_ssh",
         source=np.array([[0.5, 1.5]], dtype=np.float32),
+        sst=sst,
     )
 
 
 def _write_npz(path, *, bbox: tuple[float, float, float, float], value: float) -> None:
     field = np.full((1, 1, 6, 6), value, dtype=np.float32)
     source = np.full((1, 6, 6), value + 0.25, dtype=np.float32)
+    sst = np.full((1, 6, 6), value + 20.0, dtype=np.float32)
+    sst[:, :2, :] = 0.0
     np.savez_compressed(
         path,
         prediction=field,
         target=field - 0.5,
         input_l3_ssh=source,
+        input_l4_sst=sst,
+        input_l4_sst_present=True,
         bbox=np.array(bbox, dtype=np.float32),
         time_range=np.array(["2025-05-01", "2025-05-03"]),
         target_date="2025-05-02",

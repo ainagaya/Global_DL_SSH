@@ -5,14 +5,22 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import numpy as np
 
 from plot_prediction_regions import (
     PredictionRecord,
     choose_source_key,
     collect_available_dates,
+    compute_log_color_limits,
+    compute_sst_limits,
     compute_value_limits,
+    field_uses_sst_scale,
+    has_plottable_values,
+    load_optional_sst,
+    mask_sst_padding,
     masked_prediction_squared_error,
+    prepare_log_scaled_field,
     resolve_npz_files,
     select_2d_slice,
     source_uses_ssh_scale,
@@ -134,6 +142,7 @@ def load_prediction_records(
             target = select_2d_slice(np.asarray(payload["target"]), time_index, channel_index)
             chosen_source_key = choose_source_key(payload, source_key)
             source = select_2d_slice(np.asarray(payload[chosen_source_key]), time_index, channel_index)
+            sst = load_optional_sst(payload, time_index=time_index, channel_index=channel_index)
 
         records.append(
             PredictionRecord(
@@ -144,6 +153,7 @@ def load_prediction_records(
                 target=target,
                 source_name=chosen_source_key,
                 source=source,
+                sst=sst,
             )
         )
     return records
@@ -185,14 +195,19 @@ def compute_mosaic_limits(records: list[PredictionRecord]) -> dict[str, tuple[fl
     source_names = {record.source_name for record in records}
     if len(source_names) == 1 and source_uses_ssh_scale(next(iter(source_names))):
         source_limits = prediction_limits
+    elif len(source_names) == 1 and field_uses_sst_scale(next(iter(source_names))):
+        source_limits = compute_sst_limits(*source_arrays)
     else:
         source_limits = compute_value_limits(*source_arrays)
 
     squared_error_arrays = [masked_prediction_squared_error(record.prediction, record.target) for record in records]
-    squared_error_limits = compute_value_limits(*squared_error_arrays)
+    squared_error_limits = compute_log_color_limits(*squared_error_arrays)
+    sst_arrays = [record.sst for record in records if has_plottable_values(record.sst, ignore_zeros=True)]
+    sst_limits = compute_sst_limits(*sst_arrays) if sst_arrays else (-1.0, 1.0)
 
     return {
         "source": source_limits,
+        "sst": sst_limits,
         "prediction": prediction_limits,
         "target": prediction_limits,
         "squared_error": squared_error_limits,
@@ -203,8 +218,8 @@ def sorted_records(records: list[PredictionRecord]) -> list[PredictionRecord]:
     return sorted(records, key=lambda record: (record.bbox[2], record.bbox[0], record.path.name))
 
 
-def masked_for_overlay(field: np.ndarray) -> np.ma.MaskedArray:
-    return np.ma.masked_invalid(field)
+def masked_for_overlay(field: np.ndarray, *, mask_zero_padding: bool = False) -> np.ma.MaskedArray:
+    return mask_sst_padding(field) if mask_zero_padding else np.ma.masked_invalid(field)
 
 
 def add_base_map(axis, *, extent: tuple[float, float, float, float], use_cartopy: bool, ccrs_module, cfeature_module) -> None:
@@ -232,6 +247,7 @@ def overlay_field(
     alpha: float,
     use_cartopy: bool,
     ccrs_module,
+    log_scale: bool = False,
 ):
     cmap = plt.get_cmap(cmap_name).copy()
     cmap.set_bad(alpha=0.0)
@@ -241,29 +257,46 @@ def overlay_field(
     for record in records:
         if field_name == "source":
             field = record.source
+            mask_zero_padding = field_uses_sst_scale(record.source_name)
         elif field_name == "prediction":
             field = record.prediction
+            mask_zero_padding = False
         elif field_name == "target":
             field = record.target
+            mask_zero_padding = False
         elif field_name == "squared_error":
             field = masked_prediction_squared_error(record.prediction, record.target)
+            mask_zero_padding = False
+        elif field_name == "sst":
+            if record.sst is None:
+                continue
+            field = record.sst
+            mask_zero_padding = True
         else:
             raise ValueError(f"Unknown field name: {field_name}")
 
         lon_min, lon_max, lat_min, lat_max = record.bbox
+        display_field = (
+            prepare_log_scaled_field(field, vmin)
+            if log_scale
+            else masked_for_overlay(field, mask_zero_padding=mask_zero_padding)
+        )
         image_kwargs = {
             "origin": "lower",
             "extent": [lon_min, lon_max, lat_min, lat_max],
             "cmap": cmap,
-            "vmin": vmin,
-            "vmax": vmax,
             "alpha": alpha,
             "aspect": "auto",
             "zorder": 2,
         }
+        if log_scale:
+            image_kwargs["norm"] = LogNorm(vmin=vmin, vmax=vmax)
+        else:
+            image_kwargs["vmin"] = vmin
+            image_kwargs["vmax"] = vmax
         if use_cartopy:
             image_kwargs["transform"] = ccrs_module.PlateCarree()
-        last_image = axis.imshow(masked_for_overlay(field), **image_kwargs)
+        last_image = axis.imshow(display_field, **image_kwargs)
 
     return last_image
 
@@ -287,17 +320,30 @@ def plot_date_mosaic(
     records = sorted_records(records)
     extent = compute_mosaic_extent(records, pad_lon=pad_lon, pad_lat=pad_lat)
     limits = compute_mosaic_limits(records)
+    include_sst_panel = any(
+        has_plottable_values(record.sst, ignore_zeros=True) for record in records
+    ) and not all(field_uses_sst_scale(record.source_name) for record in records)
 
     subplot_kwargs = {"projection": ccrs.PlateCarree()} if use_cartopy else {}
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), subplot_kw=subplot_kwargs, constrained_layout=True)
+    if include_sst_panel:
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10), subplot_kw=subplot_kwargs, constrained_layout=True)
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10), subplot_kw=subplot_kwargs, constrained_layout=True)
     panel_specs = [
-        ("source", f"Source: {', '.join(sorted({record.source_name for record in records}))}", "viridis"),
-        ("prediction", "Prediction", "viridis"),
-        ("target", "Target", "viridis"),
-        ("squared_error", "Squared Error", "magma"),
+        (
+            "source",
+            f"Source: {', '.join(sorted({record.source_name for record in records}))}",
+            "inferno" if all(field_uses_sst_scale(record.source_name) for record in records) else "viridis",
+            False,
+        ),
+        ("prediction", "Prediction", "viridis", False),
+        ("target", "Target", "viridis", False),
+        ("squared_error", "Squared Error", "magma", True),
     ]
+    if include_sst_panel:
+        panel_specs.insert(1, ("sst", "Input L4 SST", "inferno", False))
 
-    for axis, (field_name, title, cmap_name) in zip(axes.ravel(), panel_specs):
+    for axis, (field_name, title, cmap_name, log_scale) in zip(axes.ravel(), panel_specs):
         add_base_map(axis, extent=extent, use_cartopy=use_cartopy, ccrs_module=ccrs, cfeature_module=cfeature)
         image = overlay_field(
             axis,
@@ -308,10 +354,13 @@ def plot_date_mosaic(
             alpha=alpha,
             use_cartopy=use_cartopy,
             ccrs_module=ccrs,
+            log_scale=log_scale,
         )
         axis.set_title(title)
         if image is not None:
             fig.colorbar(image, ax=axis, shrink=0.82)
+    for axis in axes.ravel()[len(panel_specs):]:
+        axis.set_visible(False)
 
     coastline_note = "with coastlines" if use_cartopy else "without coastlines (Cartopy not installed)"
     fig.suptitle(

@@ -5,9 +5,17 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import numpy as np
 
-from plot_prediction_regions import masked_prediction_squared_error
+from plot_prediction_regions import (
+    compute_log_color_limits,
+    compute_sst_limits,
+    has_plottable_values,
+    mask_sst_padding,
+    masked_prediction_squared_error,
+    prepare_log_scaled_field,
+)
 
 
 # This script is intended for fast visual debugging of prediction outputs saved by
@@ -116,6 +124,12 @@ def select_2d_slice(array: np.ndarray, time_index: int, channel_index: int) -> n
     raise ValueError(f"Unsupported array rank for plotting: shape={array.shape}")
 
 
+def select_optional_2d_slice(array: np.ndarray | None, time_index: int, channel_index: int) -> np.ndarray | None:
+    if array is None or array.ndim < 2 or array.size == 0:
+        return None
+    return select_2d_slice(array, time_index=time_index, channel_index=channel_index)
+
+
 def compute_common_limits(prediction_2d: np.ndarray, target_2d: np.ndarray) -> tuple[float, float]:
     combined = np.concatenate([prediction_2d.ravel(), target_2d.ravel()])
     finite = combined[np.isfinite(combined)]
@@ -173,18 +187,17 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
     prediction_2d = select_2d_slice(prediction, time_index=time_index, channel_index=channel_index)
     target_2d = select_2d_slice(target, time_index=time_index, channel_index=channel_index)
     squared_error_2d = masked_prediction_squared_error(prediction_2d, target_2d)
-    input_l3_ssh_2d = (
-        select_2d_slice(input_l3_ssh, time_index=time_index, channel_index=channel_index) if input_l3_ssh is not None else None
-    )
-    input_l4_sst_2d = (
-        select_2d_slice(input_l4_sst, time_index=time_index, channel_index=channel_index) if input_l4_sst is not None else None
-    )
+    input_l3_ssh_2d = select_optional_2d_slice(input_l3_ssh, time_index=time_index, channel_index=channel_index)
+    input_l4_sst_2d = select_optional_2d_slice(input_l4_sst, time_index=time_index, channel_index=channel_index)
 
     value_min, value_max = compute_common_limits(prediction_2d, target_2d)
-    error_min, error_max = compute_limits(squared_error_2d)
-    sst_min, sst_max = compute_limits(input_l4_sst_2d) if input_l4_sst_2d is not None else (None, None)
+    error_min, error_max = compute_log_color_limits(squared_error_2d)
+    sst_min, sst_max = compute_sst_limits(input_l4_sst_2d) if input_l4_sst_2d is not None else (None, None)
     ssh_missing = is_missing_field(input_l3_ssh_2d, input_l3_ssh_present)
-    sst_missing = is_missing_field(input_l4_sst_2d, input_l4_sst_present)
+    sst_missing = is_missing_field(input_l4_sst_2d, input_l4_sst_present) or not has_plottable_values(
+        input_l4_sst_2d,
+        ignore_zeros=True,
+    )
 
     # If bbox is available, use it as the image extent so the axes are displayed
     # in geographic coordinates rather than raw pixel coordinates.
@@ -194,37 +207,40 @@ def plot_single_file(npz_path: Path, output_dir: Path, time_index: int, channel_
         extent = [lon_min, lon_max, lat_min, lat_max]
 
     panel_specs = [
-        ("Prediction", prediction_2d, "viridis", value_min, value_max),
-        ("Target", target_2d, "viridis", value_min, value_max),
-        ("Squared Error", squared_error_2d, "magma", error_min, error_max),
+        ("Prediction", prediction_2d, "viridis", value_min, value_max, False, False, False),
+        ("Target", target_2d, "viridis", value_min, value_max, False, False, False),
+        ("Squared Error", squared_error_2d, "magma", error_min, error_max, False, False, True),
     ]
     if input_l3_ssh_2d is not None:
-        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", value_min, value_max, ssh_missing))
+        panel_specs.append(("Input L3 SSH", input_l3_ssh_2d, "viridis", value_min, value_max, ssh_missing, False, False))
     if input_l4_sst_2d is not None:
-        panel_specs.append(("Input L4 SST", input_l4_sst_2d, "inferno", sst_min, sst_max, sst_missing))
+        panel_specs.append(("Input L4 SST", input_l4_sst_2d, "inferno", sst_min, sst_max, sst_missing, True, False))
 
     fig_width = 5 * len(panel_specs)
     fig, axes = plt.subplots(1, len(panel_specs), figsize=(fig_width, 5), constrained_layout=True)
     if len(panel_specs) == 1:
         axes = [axes]
 
-    normalized_specs = []
-    for spec in panel_specs[:3]:
-        title, field_2d, cmap, vmin, vmax = spec
-        normalized_specs.append((title, field_2d, cmap, vmin, vmax, False))
-    normalized_specs.extend(panel_specs[3:])
-
-    for axis, (title, field_2d, cmap, vmin, vmax, missing) in zip(axes, normalized_specs):
+    for axis, (title, field_2d, cmap, vmin, vmax, missing, mask_zero_padding, log_scale) in zip(axes, panel_specs):
         display_field = np.zeros_like(field_2d) if missing else field_2d
-        image = axis.imshow(
-            display_field,
-            origin="lower",
-            cmap="Greys" if missing else cmap,
-            vmin=vmin,
-            vmax=vmax,
-            extent=extent,
-            aspect="auto",
-        )
+        if not missing and mask_zero_padding:
+            display_field = mask_sst_padding(field_2d)
+        if not missing and log_scale:
+            display_field = prepare_log_scaled_field(field_2d, vmin)
+        display_cmap = plt.get_cmap(cmap).copy()
+        display_cmap.set_bad(alpha=0.0)
+        image_kwargs = {
+            "origin": "lower",
+            "cmap": "Greys" if missing else display_cmap,
+            "extent": extent,
+            "aspect": "auto",
+        }
+        if log_scale and not missing:
+            image_kwargs["norm"] = LogNorm(vmin=vmin, vmax=vmax)
+        else:
+            image_kwargs["vmin"] = vmin
+            image_kwargs["vmax"] = vmax
+        image = axis.imshow(display_field, **image_kwargs)
         axis.set_title(f"{title} (missing)" if missing else title)
         if missing:
             axis.text(

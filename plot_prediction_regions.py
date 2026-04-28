@@ -44,6 +44,7 @@ class PredictionRecord:
     target: np.ndarray
     source_name: str
     source: np.ndarray
+    sst: np.ndarray | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -181,6 +182,89 @@ def choose_source_key(payload: np.lib.npyio.NpzFile, source_key: str) -> str:
     return input_keys[0]
 
 
+def has_plottable_values(array: np.ndarray | None, *, ignore_zeros: bool = False) -> bool:
+    if array is None:
+        return False
+    try:
+        valid = np.isfinite(array)
+    except TypeError:
+        return False
+    if ignore_zeros:
+        valid &= array != 0.0
+    return bool(np.any(valid))
+
+
+def field_uses_sst_scale(field_name: str) -> bool:
+    return "sst" in field_name.lower()
+
+
+def compute_sst_limits(*arrays: np.ndarray) -> tuple[float, float]:
+    finite_values = []
+    for array in arrays:
+        values = np.asarray(array)
+        try:
+            valid = values[np.isfinite(values) & (values != 0.0)]
+        except TypeError:
+            continue
+        if valid.size:
+            finite_values.append(valid)
+    if not finite_values:
+        return -1.0, 1.0
+    combined = np.concatenate(finite_values)
+    return float(combined.min()), float(combined.max())
+
+
+def compute_log_color_limits(*arrays: np.ndarray) -> tuple[float, float]:
+    positive_values = []
+    for array in arrays:
+        values = np.asarray(array)
+        try:
+            positive = values[np.isfinite(values) & (values > 0.0)]
+        except TypeError:
+            continue
+        if positive.size:
+            positive_values.append(positive)
+    if not positive_values:
+        return 1.0e-12, 1.0
+
+    combined = np.concatenate(positive_values)
+    vmin = float(combined.min())
+    vmax = float(combined.max())
+    if vmax <= vmin:
+        vmax = vmin * 10.0
+    return vmin, vmax
+
+
+def prepare_log_scaled_field(field: np.ndarray, vmin: float) -> np.ma.MaskedArray:
+    values = np.asarray(field, dtype=np.float64)
+    valid = np.isfinite(values)
+    display_values = np.where(valid, np.maximum(values, vmin), np.nan)
+    return np.ma.masked_invalid(display_values)
+
+
+def mask_sst_padding(field: np.ndarray) -> np.ma.MaskedArray:
+    values = np.asarray(field)
+    return np.ma.masked_where(~np.isfinite(values) | (values == 0.0), values)
+
+
+def load_optional_sst(
+    payload: np.lib.npyio.NpzFile,
+    *,
+    time_index: int,
+    channel_index: int,
+) -> np.ndarray | None:
+    key = "input_l4_sst"
+    if key not in payload:
+        return None
+    if "input_l4_sst_present" in payload and not bool(payload["input_l4_sst_present"]):
+        return None
+
+    array = np.asarray(payload[key])
+    if array.ndim < 2 or array.size == 0:
+        return None
+    return select_2d_slice(array, time_index, channel_index)
+
+
 def load_prediction_record(
     npz_path: Path,
     *,
@@ -199,6 +283,7 @@ def load_prediction_record(
         target = select_2d_slice(np.asarray(payload["target"]), time_index, channel_index)
         chosen_source_key = choose_source_key(payload, source_key)
         source = select_2d_slice(np.asarray(payload[chosen_source_key]), time_index, channel_index)
+        sst = load_optional_sst(payload, time_index=time_index, channel_index=channel_index)
 
     return PredictionRecord(
         path=npz_path,
@@ -208,6 +293,7 @@ def load_prediction_record(
         target=target,
         source_name=chosen_source_key,
         source=source,
+        sst=sst,
     )
 
 
@@ -256,10 +342,19 @@ def compute_panel_limits(records: list[PredictionRecord]) -> tuple[tuple[float, 
     for source_name, source_arrays in source_arrays_by_name.items():
         if source_uses_ssh_scale(source_name):
             source_limits[source_name] = value_limits
+        elif field_uses_sst_scale(source_name):
+            source_limits[source_name] = compute_sst_limits(*source_arrays)
         else:
             source_limits[source_name] = compute_value_limits(*source_arrays)
 
     return value_limits, source_limits
+
+
+def compute_sst_panel_limits(records: list[PredictionRecord]) -> tuple[float, float]:
+    sst_arrays = [record.sst for record in records if has_plottable_values(record.sst, ignore_zeros=True)]
+    if not sst_arrays:
+        return -1.0, 1.0
+    return compute_sst_limits(*sst_arrays)
 
 
 def import_cartopy():
@@ -324,13 +419,26 @@ def add_context_panel(
     axis.set_title("Context + bbox")
 
 
-def add_data_panel(axis, field: np.ndarray, bbox: tuple[float, float, float, float], title: str, cmap: str, vmin: float, vmax: float) -> None:
+def add_data_panel(
+    axis,
+    field: np.ndarray,
+    bbox: tuple[float, float, float, float],
+    title: str,
+    cmap: str,
+    vmin: float,
+    vmax: float,
+    *,
+    mask_zero_padding: bool = False,
+):
     lon_min, lon_max, lat_min, lat_max = bbox
+    display_field = mask_sst_padding(field) if mask_zero_padding else np.ma.masked_invalid(field)
+    display_cmap = plt.get_cmap(cmap).copy()
+    display_cmap.set_bad(alpha=0.0)
     image = axis.imshow(
-        field,
+        display_field,
         origin="lower",
         extent=[lon_min, lon_max, lat_min, lat_max],
-        cmap=cmap,
+        cmap=display_cmap,
         vmin=vmin,
         vmax=vmax,
         aspect="auto",
@@ -338,6 +446,17 @@ def add_data_panel(axis, field: np.ndarray, bbox: tuple[float, float, float, flo
     axis.set_title(title)
     axis.set_xlabel("Longitude")
     axis.set_ylabel("Latitude")
+    if np.ma.count(display_field) == 0:
+        axis.text(
+            0.5,
+            0.5,
+            "Missing / invalid",
+            ha="center",
+            va="center",
+            transform=axis.transAxes,
+            fontsize=10,
+            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+        )
     return image
 
 
@@ -357,13 +476,21 @@ def plot_date_records(
     use_cartopy = ccrs is not None and cfeature is not None
     sorted_records = sort_records(records)
     (value_min, value_max), source_limits = compute_panel_limits(sorted_records)
+    include_sst_panel = any(
+        has_plottable_values(record.sst, ignore_zeros=True) for record in sorted_records
+    ) and not all(field_uses_sst_scale(record.source_name) for record in sorted_records)
+    sst_min, sst_max = compute_sst_panel_limits(sorted_records)
 
     row_count = len(sorted_records)
-    fig = plt.figure(figsize=(18, 4.6 * row_count), constrained_layout=True)
-    subplot_spec = fig.add_gridspec(row_count, 4, width_ratios=[1.1, 1.0, 1.0, 1.0])
+    column_count = 5 if include_sst_panel else 4
+    fig_width = 22 if include_sst_panel else 18
+    width_ratios = [1.1, 1.0, 1.0, 1.0, 1.0] if include_sst_panel else [1.1, 1.0, 1.0, 1.0]
+    fig = plt.figure(figsize=(fig_width, 4.6 * row_count), constrained_layout=True)
+    subplot_spec = fig.add_gridspec(row_count, column_count, width_ratios=width_ratios)
 
     for row_index, record in enumerate(sorted_records):
         source_min, source_max = source_limits[record.source_name]
+        source_is_sst = field_uses_sst_scale(record.source_name)
 
         if use_cartopy:
             context_axis = fig.add_subplot(subplot_spec[row_index, 0], projection=ccrs.PlateCarree())
@@ -371,8 +498,12 @@ def plot_date_records(
             context_axis = fig.add_subplot(subplot_spec[row_index, 0])
 
         source_axis = fig.add_subplot(subplot_spec[row_index, 1])
-        prediction_axis = fig.add_subplot(subplot_spec[row_index, 2])
-        target_axis = fig.add_subplot(subplot_spec[row_index, 3])
+        next_data_column = 2
+        sst_axis = fig.add_subplot(subplot_spec[row_index, next_data_column]) if include_sst_panel else None
+        if include_sst_panel:
+            next_data_column += 1
+        prediction_axis = fig.add_subplot(subplot_spec[row_index, next_data_column])
+        target_axis = fig.add_subplot(subplot_spec[row_index, next_data_column + 1])
 
         add_context_panel(
             context_axis,
@@ -389,10 +520,23 @@ def plot_date_records(
             record.source,
             record.bbox,
             f"Source: {record.source_name}",
-            "viridis",
+            "inferno" if source_is_sst else "viridis",
             source_min,
             source_max,
+            mask_zero_padding=source_is_sst,
         )
+        if sst_axis is not None:
+            sst_field = record.sst if record.sst is not None else np.full_like(record.prediction, np.nan)
+            sst_image = add_data_panel(
+                sst_axis,
+                sst_field,
+                record.bbox,
+                "Input L4 SST",
+                "inferno",
+                sst_min,
+                sst_max,
+                mask_zero_padding=True,
+            )
         prediction_image = add_data_panel(
             prediction_axis,
             record.prediction,
@@ -413,6 +557,8 @@ def plot_date_records(
         )
 
         fig.colorbar(source_image, ax=source_axis, shrink=0.8)
+        if sst_axis is not None:
+            fig.colorbar(sst_image, ax=sst_axis, shrink=0.8)
         fig.colorbar(prediction_image, ax=prediction_axis, shrink=0.8)
         fig.colorbar(target_image, ax=target_axis, shrink=0.8)
 
