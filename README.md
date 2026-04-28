@@ -89,8 +89,16 @@ The launcher will:
 - store weights, logs, predictions, queries, MLflow artifacts, and analysis plots inside that experiment directory
 
 In resume mode, the launcher reuses that experiment's frozen runtime config and
-latest checkpoint, appends to the existing launcher logs, continues training,
-then reruns inference and analysis with the newest checkpoint.
+detects which stages already finished, appends to the existing launcher logs,
+and resumes from the earliest incomplete stage:
+
+- if download finished, it skips download
+- if training reached the configured final epoch, it skips training
+- if predictions already exist for the latest checkpoint, it skips inference
+
+If a run stopped during download, resume mode will continue from there without
+requiring an existing checkpoint. After any needed stage resumes, it reruns the
+downstream stages and analysis as required.
 
 Run inference with:
 
