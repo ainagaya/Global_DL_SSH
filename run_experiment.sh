@@ -61,6 +61,91 @@ latest_experiment_checkpoint() {
   ls -1 "$weights_dir"/"${checkpoint_name}"_epoch*.pt 2>/dev/null | sort -V | tail -n 1
 }
 
+checkpoint_epoch_number() {
+  local checkpoint_path="$1"
+  local filename
+  filename="$(basename "$checkpoint_path")"
+
+  if [[ "$filename" =~ _epoch([0-9]+)\.pt$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  return 1
+}
+
+read_training_epochs() {
+  local runtime_config="$1"
+
+  python3 - "$runtime_config" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import yaml
+
+runtime_config_path = Path(sys.argv[1])
+with runtime_config_path.open("r", encoding="utf-8") as handle:
+    config = yaml.safe_load(handle)
+
+print(int(config["training"]["epochs"]))
+PY
+}
+
+write_stage_marker() {
+  local marker_path="$1"
+  local marker_value="${2:-complete}"
+
+  printf '%s\n' "$marker_value" > "$marker_path"
+}
+
+stage_marker_matches() {
+  local marker_path="$1"
+  local expected_value="$2"
+
+  [[ -f "$marker_path" ]] || return 1
+  [[ "$(<"$marker_path")" == "$expected_value" ]]
+}
+
+is_download_complete() {
+  if [[ -f "$DOWNLOAD_COMPLETE_MARKER" ]]; then
+    return 0
+  fi
+
+  [[ -f "$LOGS_DIR/download.log" ]] || return 1
+  grep -Fq "Wrote OceanTACO download manifest to " "$LOGS_DIR/download.log"
+}
+
+is_training_complete() {
+  local training_epochs="$1"
+
+  if [[ -f "$TRAINING_COMPLETE_MARKER" ]]; then
+    return 0
+  fi
+
+  local latest_checkpoint
+  latest_checkpoint="$(latest_experiment_checkpoint "$WEIGHTS_DIR" "$EXPERIMENT_ID")"
+  [[ -n "$latest_checkpoint" ]] || return 1
+
+  local latest_epoch
+  latest_epoch="$(checkpoint_epoch_number "$latest_checkpoint")" || return 1
+  (( latest_epoch + 1 >= training_epochs ))
+}
+
+is_inference_complete() {
+  local latest_checkpoint="$1"
+
+  if stage_marker_matches "$INFERENCE_COMPLETE_MARKER" "$latest_checkpoint"; then
+    return 0
+  fi
+
+  local newest_prediction
+  newest_prediction="$(ls -1t "$PREDICTIONS_DIR"/*.npz 2>/dev/null | head -n 1)"
+  [[ -n "$newest_prediction" ]] || return 1
+  [[ "$newest_prediction" -nt "$latest_checkpoint" ]]
+}
+
 RESUME_ID=""
 BASE_CONFIG=""
 TRAINING_ARGS=()
@@ -163,6 +248,9 @@ METADATA_FILE="$EXPERIMENT_DIR/${EXPERIMENT_ID}_metadata.txt"
 BASE_CONFIG_COPY="$EXPERIMENT_DIR/${EXPERIMENT_ID}_base_config.yaml"
 RUNTIME_CONFIG="$EXPERIMENT_DIR/${EXPERIMENT_ID}_runtime_config.yaml"
 EXPERIMENTS_MD="$REPO_ROOT/EXPERIMENTS.md"
+DOWNLOAD_COMPLETE_MARKER="$EXPERIMENT_DIR/.run_experiment_download_complete"
+TRAINING_COMPLETE_MARKER="$EXPERIMENT_DIR/.run_experiment_training_complete"
+INFERENCE_COMPLETE_MARKER="$EXPERIMENT_DIR/.run_experiment_inference_complete"
 
 if [[ -n "$RESUME_ID" ]]; then
   if [[ ! -d "$EXPERIMENT_DIR" ]]; then
@@ -261,13 +349,7 @@ EOF
 fi
 
 if [[ -n "$RESUME_ID" ]]; then
-  RESUME_CHECKPOINT="$(latest_experiment_checkpoint "$WEIGHTS_DIR" "$EXPERIMENT_ID")"
-  if [[ -z "$RESUME_CHECKPOINT" ]]; then
-    echo "No checkpoint found to resume in $WEIGHTS_DIR" >&2
-    exit 1
-  fi
   echo "Resuming experiment $EXPERIMENT_ID"
-  echo "Resume checkpoint: $RESUME_CHECKPOINT"
 else
   RESUME_CHECKPOINT=""
   echo "Created experiment $EXPERIMENT_ID"
@@ -319,14 +401,30 @@ echo "Created experiment $EXPERIMENT_ID"
 echo "Commit: $GIT_COMMIT"
 echo "Experiment directory: $EXPERIMENT_DIR"
 echo "Frozen runtime config: $RUNTIME_CONFIG"
-echo "Downloading required OceanTACO data..."
-python3 download_oceantaco_local.py --config "$RUNTIME_CONFIG" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/download.log"
+TRAINING_EPOCHS="$(read_training_epochs "$RUNTIME_CONFIG")"
 
-echo "Launching training..."
-if [[ -n "$RESUME_CHECKPOINT" ]]; then
-  python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" --checkpoint "$RESUME_CHECKPOINT" "${TRAINING_ARGS[@]}" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/training.log"
+if is_download_complete; then
+  echo "Download stage already complete; skipping download."
 else
-  python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "${TRAINING_ARGS[@]}" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/training.log"
+  echo "Downloading required OceanTACO data..."
+  python3 download_oceantaco_local.py --config "$RUNTIME_CONFIG" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/download.log"
+  write_stage_marker "$DOWNLOAD_COMPLETE_MARKER"
+fi
+
+if is_training_complete "$TRAINING_EPOCHS"; then
+  echo "Training stage already complete; skipping training."
+else
+  RESUME_CHECKPOINT="$(latest_experiment_checkpoint "$WEIGHTS_DIR" "$EXPERIMENT_ID")"
+  rm -f "$INFERENCE_COMPLETE_MARKER"
+  echo "Launching training..."
+  if [[ -n "$RESUME_CHECKPOINT" ]]; then
+    echo "Resuming training from checkpoint: $RESUME_CHECKPOINT"
+    python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" --checkpoint "$RESUME_CHECKPOINT" "${TRAINING_ARGS[@]}" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/training.log"
+  else
+    echo "No existing checkpoint found; starting training from epoch 0."
+    python3 simvp_ddp_training.py --config "$RUNTIME_CONFIG" "${TRAINING_ARGS[@]}" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/training.log"
+  fi
+  write_stage_marker "$TRAINING_COMPLETE_MARKER"
 fi
 
 LATEST_CHECKPOINT="$(latest_experiment_checkpoint "$WEIGHTS_DIR" "$EXPERIMENT_ID")"
@@ -338,8 +436,13 @@ fi
 LOSS_CSV="$LOGS_DIR/${EXPERIMENT_ID}_losses.csv"
 LOSS_PLOT="$ANALYSIS_DIR/${EXPERIMENT_ID}_losses.png"
 
-echo "Launching inference with checkpoint: $LATEST_CHECKPOINT"
-python3 simvp_predict_ssh.py --config "$RUNTIME_CONFIG" --checkpoint "$LATEST_CHECKPOINT" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/prediction.log"
+if is_inference_complete "$LATEST_CHECKPOINT"; then
+  echo "Inference stage already complete for checkpoint $(basename "$LATEST_CHECKPOINT"); skipping inference."
+else
+  echo "Launching inference with checkpoint: $LATEST_CHECKPOINT"
+  python3 simvp_predict_ssh.py --config "$RUNTIME_CONFIG" --checkpoint "$LATEST_CHECKPOINT" 2>&1 | tee -a "$EXPERIMENT_DIR/logs/prediction.log"
+  write_stage_marker "$INFERENCE_COMPLETE_MARKER" "$LATEST_CHECKPOINT"
+fi
 
 if [[ -f "$LOSS_CSV" ]]; then
   echo "Plotting training curves from $LOSS_CSV"
