@@ -141,3 +141,12 @@ For every new experiment, add or complete an entry in this file with:
 ## Generated Run Ledger
 
 Future launcher-created experiments will append short records here.
+
+### a008
+
+- Created: 2026-04-28T14:12:46Z
+- Git: `329919d98a19c77d24113c15bdda6bb64f2d65dc` on branch `ref-new`
+- Base config: ``
+- Experiment dir: `experiments/a008`
+- Status: started by `run_experiment.sh`; results pending.
+- Scientific note: fill in after training and prediction complete.

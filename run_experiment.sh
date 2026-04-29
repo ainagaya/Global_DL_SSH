@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -exvuo pipefail
+set -euo pipefail
 
 # Minimal experiment manager for reproducible training runs.
 #
